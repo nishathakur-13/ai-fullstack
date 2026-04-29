@@ -7,7 +7,7 @@ from streamlit_folium import st_folium
 from streamlit_geolocation import streamlit_geolocation
 
 
-API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000")
+API_URL = os.getenv("BACKEND_API_URL", "https://backend-api-duvj.onrender.com")
 
 
 # =====================================================

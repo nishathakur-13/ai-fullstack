@@ -69,7 +69,28 @@ async def analyze(
 
     final_result = result["final"]
 
+
+    # ------------------------------------------------
+    # Ensure department is never empty
+    # ------------------------------------------------
+
+    if not final_result.get("department"):
+
+        final_result["department"] = (
+            "General Administration"
+        )
+
+
+    # ------------------------------------------------
+    # Save complaint
+    # ------------------------------------------------
+
     save_complaint(final_result)
+
+
+    # ------------------------------------------------
+    # Return response
+    # ------------------------------------------------
 
     return final_result
 
