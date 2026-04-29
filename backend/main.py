@@ -3,14 +3,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.models.schemas import (
+from .models.schemas import (
     ComplaintRequest,
     ComplaintResponse
 )
 
 from langgraph_workflow import app as langgraph_app
 
-from backend.db.supabase_client import (
+from .db.supabase_client import (
     save_complaint,
     get_complaints
 )

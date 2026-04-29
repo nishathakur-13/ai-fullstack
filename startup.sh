@@ -1,1 +1,1 @@
-source venv/bin/activate && uvicorn backend.main:app --reload
+source venv/bin/activate && export PYTHONPATH=$(pwd):$PYTHONPATH && uvicorn backend.main:app --reload
