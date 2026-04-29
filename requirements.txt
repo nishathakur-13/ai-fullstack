@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+pydantic
+python-dotenv
+requests
+streamlit
+supabase
+groq
+sentence-transformers
+scikit-learn
+numpy
+pandas
+streamlit-folium
+folium
+streamlit-folium
+geopy
+streamlit-geolocation

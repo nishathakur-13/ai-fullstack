@@ -1,0 +1,111 @@
+# Deployment Guide for Render
+
+This guide outlines the steps to deploy your FastAPI backend and Streamlit frontend (as a Docker image) to Render.
+
+## Prerequisites
+
+1.  **Render Account:** Ensure you have an active Render account.
+2.  **Git Repository:** Your project must be hosted on a Git provider (GitHub, GitLab, Bitbucket) that Render can connect to.
+3.  **`frontend.Dockerfile`:** This file should be in your project's root directory (or specified path) as created by the Gemini CLI.
+
+---
+
+## Step 1: Deploy the FastAPI Backend (Web Service)
+
+The backend is a Python Web Service that will run your `backend/main.py` application.
+
+1.  **Log in to Render:** Go to [https://dashboard.render.com/](https://dashboard.render.com/) and log in.
+2.  **Create a New Web Service:**
+    *   Click "New" -> "Web Service".
+    *   Connect your Git repository where this project is hosted.
+    *   Click "Connect" next to your repository.
+3.  **Configure the Web Service:**
+    *   **Name:** `backend-api` (or a name of your choice)
+    *   **Region:** Choose a region close to your users.
+    *   **Branch:** `main` (or your default branch)
+    *   **Root Directory:** `backend` (This tells Render to look inside the `backend` folder for your application files and `requirements.txt`).
+    *   **Runtime:** `Python 3`
+    *   **Build Command:** `pip install -r requirements.txt`
+    *   **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
+        *   *Note:* `main:app` assumes your FastAPI application instance is named `app` within `main.py`. If it's different, adjust accordingly. `$PORT` is a Render environment variable.
+    *   **Instance Type:** Choose a suitable instance type (e.g., `Free` for testing, `Starter` for production).
+4.  **Add Environment Variables:**
+    *   Go to "Advanced" -> "Add Environment Variable".
+    *   You will likely need to add any environment variables your backend uses (e.g., API keys, database connection strings).
+    *   **Crucially, add your OpenWeatherMap API key:**
+        *   `Key`: `OPENWEATHERMAP_API_KEY`
+        *   `Value`: `a8fc2c4e33c7c31330db5f137b386a3f` (This value was retrieved from your Gemini memory.)
+    *   **Add your Groq API Key:**
+        *   `Key`: `GROQ_API_KEY`
+        *   `Value`: Your actual Groq API Key (e.g., `gsk_YOUR_GROQ_API_KEY`). You can find this in your Groq console.
+    *   **Add your Supabase URL and Key:**
+        *   `Key`: `SUPABASE_URL`
+        *   `Value`: Your Supabase Project URL.
+        *   `Key`: `SUPABASE_KEY`
+        *   `Value`: Your Supabase Project `anon` key.
+    *   Add any other variables from your local `.env` file in the `backend` directory.
+5.  **Deploy:** Click "Create Web Service".
+6.  **Note the Backend URL:** Once deployed, Render will provide a URL for your backend service (e.g., `https://backend-api.onrender.com`). Copy this URL; you'll need it for the frontend.
+
+---
+
+## Step 2: Deploy the Streamlit Frontend (Docker Image)
+
+The frontend will be deployed as a Docker image, using the `frontend.Dockerfile` you've created.
+
+1.  **Log in to Render:** If not already logged in.
+2.  **Create a New Web Service:**
+    *   Click "New" -> "Web Service".
+    *   Connect the *same* Git repository.
+3.  **Configure the Web Service:**
+    *   **Name:** `frontend-app` (or a name of your choice)
+    *   **Region:** Choose the same region as your backend for better performance.
+    *   **Branch:** `main` (or your default branch)
+    *   **Root Directory:** Leave empty or set to `/` if your `frontend.Dockerfile` is in the root. If you placed it in a subdirectory, specify that. (Assuming `frontend.Dockerfile` is in the root for this guide).
+    *   **Runtime:** `Docker` (This is the key difference from the backend deployment).
+    *   **Dockerfile Path:** `./frontend.Dockerfile` (This tells Render where to find your Dockerfile).
+    *   **Instance Type:** Choose a suitable instance type.
+4.  **Add Environment Variables:**
+    *   Go to "Advanced" -> "Add Environment Variable".
+    *   **Connect to Backend:** Add an environment variable for your frontend to know the backend's URL:
+        *   `Key`: `BACKEND_API_URL`
+        *   `Value`: Paste the URL you noted from your backend service (e.g., `https://backend-api.onrender.com`).
+5.  **Deploy:** Click "Create Web Service".
+
+---
+
+## Step 3: Update `streamlit.py` to use Environment Variable
+
+Your `streamlit.py` currently hardcodes `API_URL = "http://localhost:8000"`. You need to modify it to read the `BACKEND_API_URL` environment variable that you set in Render.
+
+1.  **Open `streamlit.py`** in your local development environment.
+2.  **Modify the `API_URL` line** to dynamically fetch the URL from the environment, with a fallback for local development:
+
+    ```python
+    import os
+    import requests
+    import streamlit as st
+    import folium
+
+    from streamlit_folium import st_folium
+    from streamlit_geolocation import streamlit_geolocation
+
+
+    API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000")
+    ```
+3.  **Commit and Push:** Commit this change to your Git repository and push it to the branch connected to Render. This will trigger a redeployment of your frontend service, which will then pick up the new environment variable.
+
+---
+
+## Step 4: Verification
+
+1.  Once both services are deployed and the frontend has redeployed with the updated `streamlit.py`, navigate to the URL of your `frontend-app` service on Render.
+2.  Your Streamlit application should now be running and successfully communicating with your FastAPI backend.
+
+---
+
+**Important Considerations:**
+
+*   **CORS:** Ensure your FastAPI backend has appropriate CORS (Cross-Origin Resource Sharing) settings to allow requests from your Streamlit frontend's domain. If you encounter issues, you might need to add your frontend's Render URL to your FastAPI CORS origins.
+*   **Database:** If your backend connects to a database, ensure your database is also accessible from Render (e.g., if it's a Supabase database, ensure the connection string is correctly set as an environment variable in your backend service).
+*   **Scalability:** Monitor your services and adjust instance types as needed based on traffic and resource usage.

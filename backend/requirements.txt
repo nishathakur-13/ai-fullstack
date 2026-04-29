@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pydantic
+python-dotenv
+supabase
+groq
+sentence-transformers
+scikit-learn
+numpy
+pandas
+geopy

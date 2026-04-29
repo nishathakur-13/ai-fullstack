@@ -1,0 +1,63 @@
+This is a full-stack application designed as an "AI Public Complaint Prioritization System". It allows users to submit civic complaints,
+  which are then analyzed by an AI to determine their urgency and the relevant department. The complaints are then displayed on a dashboard
+   with a map.
+
+  Here's a breakdown of the project:
+
+  Backend
+
+  The backend is built using the FastAPI framework in Python.
+
+
+   - `main.py`: This is the core of the backend. It defines the API endpoints:
+       - /analyze: This endpoint receives a complaint (text and location) from the frontend. It uses the AI analyzer to process the
+         complaint, saves the result to the database, and then returns the analysis to the frontend.
+       - /complaints: This endpoint retrieves and returns all the complaint history from the database.
+
+
+   - `ai/analyzer.py`: This module contains the AI logic. It uses the Groq API to access a large language model (llama-3.3-70b-versatile).
+     It sends the complaint text to the model and asks it to determine the urgency, the responsible department, and an estimated resolution
+      time.
+
+   - `ai/prompts.py`: This file defines the instructions (the "system prompt") for the AI model, telling it how to analyze the complaints
+     and what kind of information to extract.
+
+
+   - `db/supabase_client.py`: This handles the database operations. It uses the Supabase Python client to:
+       - Save new complaints to a complaints table.
+       - Retrieve all existing complaints.
+
+
+   - `utils/geocoder.py`: A utility that uses the `geopy` library to convert the location provided by the user (as text) into geographical
+     coordinates (latitude and longitude). This is used to place markers on the map.
+
+
+   - `models/schemas.py`: Defines the data structures for API requests and responses using Pydantic, which helps with data validation.
+
+  Frontend
+
+  The frontend is a web application built with Streamlit.
+
+
+   - `app.py`: This file creates the user interface, which has two main tabs:
+       - Submit Complaint: A form where a user can type in their complaint and location. When submitted, it calls the backend's /analyze
+         endpoint.
+       - Complaint Dashboard: This tab displays all the submitted complaints. It features:
+           - A map (using Folium) that shows the location of each complaint with a colored marker indicating its urgency.
+           - It can also show the user's live GPS location and draw a route to a complaint.
+           - A filter to view complaints by urgency level.
+           - A detailed list of all complaints below the map.
+
+  How it works together:
+
+
+   1. A user opens the Streamlit web app in their browser.
+   2. They enter a complaint and location in the "Submit Complaint" tab.
+   3. The frontend sends this information to the FastAPI backend.
+   4. The backend uses the Groq AI service to analyze the complaint's text.
+   5. The backend uses geopy to get coordinates for the location.
+   6. The backend saves the complaint, the AI's analysis, and the coordinates to the Supabase database.
+   7. The analysis is sent back to the frontend and displayed to the user.
+   8. In the "Complaint Dashboard" tab, the frontend fetches all complaints from the backend and displays them on the map and in a list.
+   1. A user opens the Streamlit web app in their browser.
+   2. They enter a complaint and location in the "Submit Complaint" tab.
