@@ -3,9 +3,13 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 import folium
+from folium.plugins import AntPath
+from geopy.geocoders import Nominatim
 
 from streamlit_folium import st_folium
 from streamlit_geolocation import streamlit_geolocation
+
+geolocator = Nominatim(user_agent="civicai_nav")
 
 
 API_URL = os.getenv(
@@ -220,7 +224,7 @@ def get_route(start_lat, start_lon, end_lat, end_lon):
             f"route/v1/driving/"
             f"{start_lon},{start_lat};"
             f"{end_lon},{end_lat}"
-            f"?overview=full&geometries=geojson"
+            f"?overview=full&geometries=geojson&steps=true&annotations=true"
         )
 
         print("\n======================")
@@ -256,6 +260,78 @@ def get_route(start_lat, start_lon, end_lat, end_lon):
             return None
 
         route = routes[0]
+        legs = route.get("legs", [])
+
+        steps = []
+
+        for leg in legs:
+
+            for step in leg.get("steps", []):
+
+                maneuver = step.get("maneuver", {})
+                m_type = maneuver.get("type", "")
+                m_mod  = maneuver.get("modifier", "")
+
+                # Road name: prefer name, then ref, then reverse-geocode
+                road_name = step.get("name") or step.get("ref") or ""
+                if not road_name:
+                    loc = maneuver.get("location")  # [lon, lat]
+                    if loc:
+                        try:
+                            rev = geolocator.reverse(
+                                f"{loc[1]}, {loc[0]}", language="en", timeout=3
+                            )
+                            if rev:
+                                addr = rev.raw.get("address", {})
+                                road_name = (
+                                    addr.get("road")
+                                    or addr.get("neighbourhood")
+                                    or addr.get("suburb")
+                                    or addr.get("city_district")
+                                    or addr.get("city")
+                                    or ""
+                                )
+                        except Exception:
+                            pass
+                if not road_name:
+                    road_name = "the road ahead"
+
+                # Build human-readable instruction
+                turn_map = {
+                    "turn left":          "Turn left",
+                    "turn right":         "Turn right",
+                    "turn slight left":   "Slight left",
+                    "turn slight right":  "Slight right",
+                    "turn sharp left":    "Sharp left",
+                    "turn sharp right":   "Sharp right",
+                    "turn uturn":         "Make a U-turn",
+                    "depart":             "Head",
+                    "arrive":             "You have arrived at",
+                    "roundabout":         "Enter the roundabout",
+                    "rotary":             "Enter the rotary",
+                    "merge":              "Merge",
+                    "fork left":          "Keep left at the fork",
+                    "fork right":         "Keep right at the fork",
+                    "on ramp left":       "Take the ramp on the left",
+                    "on ramp right":      "Take the ramp on the right",
+                    "off ramp left":      "Take the exit on the left",
+                    "off ramp right":     "Take the exit on the right",
+                    "end of road left":   "Turn left at the end of the road",
+                    "end of road right":  "Turn right at the end of the road",
+                    "continue":           "Continue straight on",
+                    "new name":           "Continue onto",
+                }
+                key = f"{m_type} {m_mod}".strip().lower()
+                verb = turn_map.get(key) or turn_map.get(m_type.lower(), "Continue on")
+                instruction = f"{verb} {road_name}".strip()
+
+                distance = round(step.get("distance", 0))
+
+                steps.append({
+                    "instruction": instruction,
+                    "road": road_name,
+                    "distance": distance
+                })
 
         geometry = route.get("geometry")
 
@@ -277,23 +353,11 @@ def get_route(start_lat, start_lon, end_lat, end_lon):
             return None
 
         print("\n✅ ROUTE SUCCESS")
-
         return {
-
-            "coordinates":
-            coordinates,
-
-            "distance":
-            round(
-                route["distance"] / 1000,
-                2
-            ),
-
-            "duration":
-            round(
-                route["duration"] / 60,
-                2
-            )
+            "coordinates": coordinates,
+            "steps": steps,
+            "distance": round(route.get("distance", 0) / 1000, 2),
+            "duration": round(route.get("duration", 0) / 60, 2)
         }
 
     except Exception as e:
@@ -493,6 +557,22 @@ with tab2:
             unsafe_allow_html=True
         )
 
+    components.html(
+        """
+        <script>
+        navigator.geolocation.watchPosition(
+            (position) => {
+                console.log("LIVE GPS:", position.coords.latitude, position.coords.longitude,
+                            "±" + position.coords.accuracy + "m");
+            },
+            (error) => { console.log(error); },
+            { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+        );
+        </script>
+        """,
+        height=0,
+    )
+
     if geo["latitude"] is not None:
         user_lat = geo["latitude"]
         user_lon = geo["longitude"]
@@ -615,7 +695,8 @@ with tab2:
         hotspot_map = folium.Map(
             location=[user_lat, user_lon],
             zoom_start=13,
-            tiles="CartoDB dark_matter"
+            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            attr="Esri"
         )
 
         folium.Marker(
@@ -765,8 +846,8 @@ with tab2:
 
                 route_map = folium.Map(
                     location=[mid_lat, mid_lon],
-                    zoom_start=16,
-                    tiles="CartoDB dark_matter"
+                    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                    attr="Esri"
                 )
 
                 # Route line if OSRM succeeded
@@ -775,11 +856,14 @@ with tab2:
                         [coord[1], coord[0]]
                         for coord in route_data["coordinates"]
                     ]
-                    folium.PolyLine(
-                        points,
+                    AntPath(
+                        locations=points,
+                        color="yellow",
+                        pulse_color="red",
                         weight=6,
-                        color="#3b82f6"
+                        delay=800
                     ).add_to(route_map)
+                    route_map.fit_bounds(points)
 
                 # Your location marker
                 folium.Marker(
@@ -841,6 +925,102 @@ with tab2:
                   </div>
                 </div>
                 """, unsafe_allow_html=True)
+
+        if route_data and route_data.get("steps"):
+
+            current_step = route_data["steps"][0]
+
+            instruction = current_step.get(
+                "instruction",
+                "Continue"
+            )
+
+            road = current_step.get(
+                "road",
+                "Unknown road"
+            )
+
+            distance = current_step.get(
+                "distance",
+                0
+            )
+
+            st.markdown(f"""
+            <div style="
+              position:relative;
+              background:#111827;
+              border:2px solid #2563eb;
+              border-radius:16px;
+              padding:20px;
+              margin-top:16px;
+              box-shadow:0 0 20px rgba(37,99,235,0.35);
+              animation:pulse 2s infinite;
+            ">
+
+              <div style="
+                font-size:12px;
+                color:#60a5fa;
+                font-weight:700;
+                letter-spacing:1px;
+                margin-bottom:10px;
+              ">
+                LIVE NAVIGATION
+              </div>
+
+              <div style="
+                font-size:28px;
+                font-weight:800;
+                color:white;
+                margin-bottom:12px;
+              ">
+                 {instruction}
+              </div>
+
+              <div style="
+                font-size:18px;
+                color:#d1d5db;
+              ">
+                ️ {road}
+              </div>
+
+              <div style="
+                margin-top:10px;
+                font-size:16px;
+                color:#facc15;
+                font-weight:700;
+              ">
+                 in {distance} meters
+              </div>
+
+            </div>
+            """, unsafe_allow_html=True)
+
+            voice_text = (
+                f"{instruction}. "
+                f"Continue on {road}. "
+                f"In {distance} meters."
+            )
+
+            components.html(
+                f"""
+                <script>
+
+                const msg = new SpeechSynthesisUtterance(
+                    `{voice_text}`
+                );
+
+                msg.rate = 1;
+                msg.pitch = 1;
+                msg.volume = 1;
+
+                window.speechSynthesis.cancel();
+
+                window.speechSynthesis.speak(msg);
+
+                </script>
+                """,
+                height=0,
+            )
 
         st.markdown("<hr>", unsafe_allow_html=True)
 
