@@ -44,6 +44,9 @@ st.markdown("""
 #MainMenu, footer, [data-testid="stToolbar"],
 [data-testid="stDecoration"]        { display: none !important; }
 
+/* Force all iframes (components.html) to fill full width */
+iframe { width: 100% !important; min-width: 100% !important; }
+
 /* Tabs */
 [data-testid="stTabs"] button[role="tab"] {
     background: transparent;
@@ -170,6 +173,22 @@ if "_selected_complaint" not in st.session_state:
 # =====================================================
 # HELPERS
 # =====================================================
+
+import math
+
+def distance_meters(lat1, lon1, lat2, lon2):
+    R = 6371000
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
+    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+def is_off_route(user_lat, user_lon, route_coords, threshold=30):
+    for coord in route_coords:
+        if distance_meters(user_lat, user_lon, coord[1], coord[0]) < threshold:
+            return False
+    return True
 
 @st.cache_data(ttl=30)
 def fetch_complaints():
@@ -557,22 +576,6 @@ with tab2:
             unsafe_allow_html=True
         )
 
-    components.html(
-        """
-        <script>
-        navigator.geolocation.watchPosition(
-            (position) => {
-                console.log("LIVE GPS:", position.coords.latitude, position.coords.longitude,
-                            "±" + position.coords.accuracy + "m");
-            },
-            (error) => { console.log(error); },
-            { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
-        );
-        </script>
-        """,
-        height=0,
-    )
-
     if geo["latitude"] is not None:
         user_lat = geo["latitude"]
         user_lon = geo["longitude"]
@@ -794,6 +797,13 @@ with tab2:
                     sel_lon
                 )
 
+                if route_data:
+                    st.session_state["current_route"] = route_data
+                    if is_off_route(float(user_lat), float(user_lon), route_data["coordinates"]):
+                        st.error("⚠️ You are off-route. Rerouting...")
+                        route_data = get_route(float(user_lat), float(user_lon), sel_lat, sel_lon)
+                        st.session_state["current_route"] = route_data
+
                 dept = selected.get("department", "N/A")
 
                 selected_location = safe_location(
@@ -890,137 +900,154 @@ with tab2:
                 ).add_to(route_map)
 
         # =================================================
+        # Force maps iframe to full width via JS (CSS can't override inline width attr)
+        components.html("""<script>
+(function(){
+  function fixWidth(){
+    document.querySelectorAll('iframe').forEach(f=>{
+      f.style.width='100%';
+      f.setAttribute('width','100%');
+    });
+  }
+  fixWidth();
+  new MutationObserver(fixWidth).observe(document.body,{childList:true,subtree:true});
+})();
+</script>""", height=0)
+
         # MAPS SIDE BY SIDE
         # =================================================
 
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        st.markdown("""
+        <style>
+        iframe { width: 100% !important; }
+        </style>
+        <div style='height:8px'></div>
+        """, unsafe_allow_html=True)
 
-        mc1, mc2 = st.columns(2, gap="medium")
+        import json as _json
+        _dest_lat = float(sel_lat) if route_data else user_lat
+        _dest_lon = float(sel_lon) if route_data else user_lon
+        _route_coords_js = _json.dumps(
+            [[c[1], c[0]] for c in route_data["coordinates"]] if route_data else []
+        )
+        _steps_js = _json.dumps(route_data["steps"] if route_data else [])
 
-        with mc1:
-            st.markdown("""
-            <div style="font-size:14px; font-weight:600; color:#8b949e; margin-bottom:8px;">
-              🗺️ Complaint Hotspots
-            </div>""", unsafe_allow_html=True)
-            st_folium(hotspot_map, height=400, use_container_width=True, key="hotspot_map")
+        # Build complaint markers JSON for hotspot map
+        _hotspot_markers = []
+        for item in valid_complaints:
+            try:
+                _hotspot_markers.append({
+                    "lat": float(item.get("latitude")),
+                    "lon": float(item.get("longitude")),
+                    "urgency": item.get("urgency", "LOW"),
+                    "text": item.get("complaint_text", "")[:80],
+                    "dept": item.get("department", "N/A"),
+                })
+            except (TypeError, ValueError):
+                continue
+        _markers_js = _json.dumps(_hotspot_markers)
 
-        with mc2:
-            st.markdown("""
-            <div style="font-size:14px; font-weight:600; color:#8b949e; margin-bottom:8px;">
-              🚗 Route Map
-            </div>""", unsafe_allow_html=True)
-            if route_map is not None:
-                st_folium(route_map, height=400, use_container_width=True, key="route_map_render")
-            else:
-                st.markdown("""
-                <div style="
-                  height:400px; border:2px dashed #21262d; border-radius:12px;
-                  display:flex; flex-direction:column; align-items:center;
-                  justify-content:center; color:#484f58; text-align:center;
-                ">
-                  <div style="font-size:32px; margin-bottom:10px;">🗺️</div>
-                  <div style="font-size:14px; font-weight:600; color:#8b949e;">No route selected</div>
-                  <div style="font-size:12px; margin-top:6px; color:#30363d;">
-                    Pick a complaint above to see navigation
-                  </div>
-                </div>
-                """, unsafe_allow_html=True)
+        _urgency_colors = _json.dumps({
+            "CRITICAL": "#ef4444", "HIGH": "#f97316",
+            "MEDIUM": "#eab308", "LOW": "#22c55e"
+        })
+
+        components.html(f"""<!DOCTYPE html><html><head><meta charset="utf-8"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+html,body{{margin:0;padding:0;background:#0d1117;width:100%;overflow:hidden}}
+#wrap{{display:flex;width:100%;gap:8px}}
+.map-box{{flex:1;min-width:0}}
+.map-label{{font-size:13px;font-weight:600;color:#8b949e;font-family:sans-serif;margin-bottom:4px;padding-left:2px}}
+.map{{width:100%;height:420px}}
+</style></head><body>
+<div id="wrap">
+  <div class="map-box">
+    <div class="map-label">🗺️ Complaint Hotspots</div>
+    <div id="map1" class="map"></div>
+  </div>
+  <div class="map-box">
+    <div class="map-label">🚗 Live Route Map</div>
+    <div id="map2" class="map"></div>
+  </div>
+</div>
+<script>
+const TILES='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}';
+const INIT=[{user_lat},{user_lon}];
+const DEST=[{_dest_lat},{_dest_lon}];
+const routeCoords={_route_coords_js};
+const steps={_steps_js};
+const markers={_markers_js};
+const COLORS={_urgency_colors};
+
+// ── Map 1: Hotspot ────────────────────────────────
+const map1=L.map('map1').setView(INIT,13);
+L.tileLayer(TILES,{{maxZoom:19,attribution:'Esri'}}).addTo(map1);
+L.marker(INIT,{{icon:L.divIcon({{html:'<div style="font-size:20px">📍</div>',iconSize:[24,24],iconAnchor:[12,12],className:''}})}}
+).bindTooltip('You').addTo(map1);
+markers.forEach(m=>{{
+  const color=COLORS[m.urgency]||'#6b7280';
+  L.circleMarker([m.lat,m.lon],{{radius:8,color:color,fillColor:color,fillOpacity:0.85,weight:2}})
+   .bindPopup(`<b>${{m.urgency}}</b><br>${{m.text}}<br><small>${{m.dept}}</small>`)
+   .bindTooltip(m.urgency+': '+m.text.slice(0,40))
+   .addTo(map1);
+}});
+
+// ── Map 2: Live Route ─────────────────────────────
+const map2=L.map('map2').setView(INIT,15);
+L.tileLayer(TILES,{{maxZoom:19,attribution:'Esri'}}).addTo(map2);
+L.marker(DEST,{{icon:L.divIcon({{html:'<div style="font-size:24px">🚨</div>',iconSize:[28,28],iconAnchor:[14,14],className:''}})}}
+).bindTooltip('Destination').addTo(map2);
+const userIcon=L.divIcon({{html:'<div style="width:16px;height:16px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 0 0 5px rgba(59,130,246,0.3)"></div>',iconSize:[16,16],iconAnchor:[8,8],className:''}});
+const userMarker=L.marker(INIT,{{icon:userIcon,zIndexOffset:1000}}).bindTooltip('You').addTo(map2);
+let routeLine=routeCoords.length?L.polyline(routeCoords,{{color:'#facc15',weight:5,opacity:0.85}}).addTo(map2):null;
+setTimeout(()=>{{map1.invalidateSize();map2.invalidateSize();if(routeLine)map2.fitBounds(routeLine.getBounds(),{{padding:[30,30]}});}},300);
+
+// ── Live tracking ─────────────────────────────────
+function haversine(a,b){{const R=6371000,dLat=(b[0]-a[0])*Math.PI/180,dLon=(b[1]-a[1])*Math.PI/180;const s=Math.sin(dLat/2)**2+Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLon/2)**2;return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));}}
+function minDistToRoute(pos){{if(!routeCoords.length)return 0;let min=Infinity;for(let i=0;i<routeCoords.length-1;i++){{const a=routeCoords[i],b=routeCoords[i+1],dx=b[1]-a[1],dy=b[0]-a[0],len2=dx*dx+dy*dy;let t=len2?Math.max(0,Math.min(1,((pos[1]-a[1])*dx+(pos[0]-a[0])*dy)/len2)):0;min=Math.min(min,haversine(pos,[a[0]+t*dy,a[1]+t*dx]));}}return min;}}
+function headingWaypoint(from,to,d){{const R=6371000,la=from[0]*Math.PI/180,lo=from[1]*Math.PI/180,br=Math.atan2(Math.sin((to[1]-from[1])*Math.PI/180)*Math.cos(to[0]*Math.PI/180),Math.cos(from[0]*Math.PI/180)*Math.sin(to[0]*Math.PI/180)-Math.sin(from[0]*Math.PI/180)*Math.cos(to[0]*Math.PI/180)*Math.cos((to[1]-from[1])*Math.PI/180)),dd=d/R,la2=Math.asin(Math.sin(la)*Math.cos(dd)+Math.cos(la)*Math.sin(dd)*Math.cos(br));return[la2*180/Math.PI,(lo+Math.atan2(Math.sin(br)*Math.sin(dd)*Math.cos(la),Math.cos(dd)-Math.sin(la)*Math.sin(la2)))*180/Math.PI];}}
+let stepIdx=0,lastSpoken='',rerouting=false,lastPos=null;
+function speak(t){{if(t===lastSpoken)return;lastSpoken=t;window.parent.postMessage({{type:'speak',text:t}},'*');}}
+function updateNav(){{if(!steps.length)return;while(stepIdx<steps.length-1&&steps[stepIdx].distance<30)stepIdx++;const s=steps[stepIdx];speak((s.instruction||'Continue')+(s.road?' on '+s.road:'')+(s.distance?', in '+s.distance+' meters':''));}}
+async function reroute(lat,lon){{if(rerouting)return;rerouting=true;speak('Rerouting');try{{let via='';if(lastPos&&haversine(lastPos,[lat,lon])>5){{const wp=headingWaypoint(lastPos,[lat,lon],200);via=wp[1]+','+wp[0]+';';}}const r=await fetch('https://router.project-osrm.org/route/v1/driving/'+lon+','+lat+';'+via+DEST[1]+','+DEST[0]+'?overview=full&geometries=geojson&steps=true');const d=await r.json();if(routeLine)map2.removeLayer(routeLine);routeLine=L.polyline(d.routes[0].geometry.coordinates.map(c=>[c[1],c[0]]),{{color:'#facc15',weight:5,opacity:0.85}}).addTo(map2);routeCoords.length=0;d.routes[0].geometry.coordinates.forEach(c=>routeCoords.push([c[1],c[0]]));steps.length=0;stepIdx=0;for(const leg of d.routes[0].legs)for(const step of leg.steps){{const m=step.maneuver||{{}};steps.push({{instruction:m.instruction||(m.type||'Continue'),road:step.name||step.ref||'the road ahead',distance:Math.round(step.distance||0)}});}}}}catch(e){{console.error(e);}}rerouting=false;}}
+navigator.geolocation.watchPosition(pos=>{{
+  const lat=pos.coords.latitude,lon=pos.coords.longitude;
+  userMarker.setLatLng([lat,lon]);
+  map2.panTo([lat,lon],{{animate:true,duration:0.5}});
+  map1.panTo([lat,lon],{{animate:true,duration:0.5}});
+  if(steps.length&&stepIdx<steps.length)steps[stepIdx].distance=Math.max(0,Math.round(haversine([lat,lon],DEST)));
+  updateNav();
+  if(minDistToRoute([lat,lon])>30)reroute(lat,lon);
+  lastPos=[lat,lon];
+}},err=>console.error(err),{{enableHighAccuracy:true,maximumAge:0,timeout:5000}});
+</script></body></html>""", height=460, width=10000, scrolling=False)
+
+        # Parent-page speech listener — receives postMessage from iframe and speaks
+        components.html("""<script>
+window.addEventListener('message', e => {
+  if(e.data && e.data.type === 'speak') {
+    const u = new SpeechSynthesisUtterance(e.data.text);
+    u.rate = 1; u.pitch = 1; u.volume = 1;
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+  }
+});
+</script>""", height=0)
 
         if route_data and route_data.get("steps"):
-
-            current_step = route_data["steps"][0]
-
-            instruction = current_step.get(
-                "instruction",
-                "Continue"
-            )
-
-            road = current_step.get(
-                "road",
-                "Unknown road"
-            )
-
-            distance = current_step.get(
-                "distance",
-                0
-            )
-
+            s = route_data["steps"][0]
             st.markdown(f"""
-            <div style="
-              position:relative;
-              background:#111827;
-              border:2px solid #2563eb;
-              border-radius:16px;
-              padding:20px;
-              margin-top:16px;
-              box-shadow:0 0 20px rgba(37,99,235,0.35);
-              animation:pulse 2s infinite;
-            ">
-
-              <div style="
-                font-size:12px;
-                color:#60a5fa;
-                font-weight:700;
-                letter-spacing:1px;
-                margin-bottom:10px;
-              ">
-                LIVE NAVIGATION
-              </div>
-
-              <div style="
-                font-size:28px;
-                font-weight:800;
-                color:white;
-                margin-bottom:12px;
-              ">
-                 {instruction}
-              </div>
-
-              <div style="
-                font-size:18px;
-                color:#d1d5db;
-              ">
-                ️ {road}
-              </div>
-
-              <div style="
-                margin-top:10px;
-                font-size:16px;
-                color:#facc15;
-                font-weight:700;
-              ">
-                 in {distance} meters
-              </div>
-
+            <div style="position:relative;background:#111827;border:2px solid #2563eb;border-radius:16px;
+              padding:20px;margin-top:16px;box-shadow:0 0 20px rgba(37,99,235,0.35);animation:pulse 2s infinite;">
+              <style>@keyframes pulse{{0%,100%{{box-shadow:0 0 20px rgba(37,99,235,0.35)}}50%{{box-shadow:0 0 32px rgba(37,99,235,0.7)}}}}</style>
+              <div style="font-size:12px;color:#60a5fa;font-weight:700;letter-spacing:1px;margin-bottom:10px;">LIVE NAVIGATION</div>
+              <div style="font-size:28px;font-weight:800;color:white;margin-bottom:12px;">{s.get('instruction','Continue')}</div>
+              <div style="font-size:18px;color:#d1d5db;">🛣️ {s.get('road','')}</div>
+              <div style="margin-top:10px;font-size:16px;color:#facc15;font-weight:700;">📍 in {s.get('distance',0)} meters</div>
             </div>
             """, unsafe_allow_html=True)
-
-            voice_text = (
-                f"{instruction}. "
-                f"Continue on {road}. "
-                f"In {distance} meters."
-            )
-
-            components.html(
-                f"""
-                <script>
-
-                const msg = new SpeechSynthesisUtterance(
-                    `{voice_text}`
-                );
-
-                msg.rate = 1;
-                msg.pitch = 1;
-                msg.volume = 1;
-
-                window.speechSynthesis.cancel();
-
-                window.speechSynthesis.speak(msg);
-
-                </script>
-                """,
-                height=0,
-            )
 
         st.markdown("<hr>", unsafe_allow_html=True)
 
