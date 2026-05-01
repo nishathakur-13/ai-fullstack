@@ -1,4 +1,5 @@
 from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 
 
 geolocator = Nominatim(
@@ -10,60 +11,77 @@ def get_coordinates(location_text):
 
     try:
 
-        # -----------------------------------
-        # First Attempt
-        # -----------------------------------
+        if not location_text or not str(location_text).strip():
 
-        enhanced_query = (
-            f"{location_text}, "
-            f"Uttarakhand, India"
-        )
-
-        print("\nGEOCODING QUERY:")
-        print(enhanced_query)
-
-        location = geolocator.geocode(
-            enhanced_query
-        )
-
-        # -----------------------------------
-        # Success
-        # -----------------------------------
-
-        if location:
+            print("\n❌ EMPTY LOCATION\n")
 
             return {
-
-                "latitude":
-                location.latitude,
-
-                "longitude":
-                location.longitude
+                "latitude": None,
+                "longitude": None
             }
 
-        # -----------------------------------
-        # Fallback to Haldwani Center
-        # -----------------------------------
+        location_text = location_text.strip()
 
-        print(
-            "\nFALLBACK TO HALDWANI"
-        )
+        print("\n========================")
+        print("📍 GEOCODING START")
+        print("========================")
 
-        fallback = geolocator.geocode(
-            "Haldwani, Uttarakhand, India"
-        )
+        queries = [
 
-        if fallback:
+            # exact
+            location_text,
 
-            return {
+            # india
+            f"{location_text}, India",
 
-                "latitude":
-                fallback.latitude,
+            # uttarakhand
+            f"{location_text}, Uttarakhand, India",
 
-                "longitude":
-                fallback.longitude
-            }
+            # haldwani region
+            f"{location_text}, Haldwani, Uttarakhand, India"
+        ]
 
+        for query in queries:
+
+            try:
+
+                print(f"\n🔎 TRYING: {query}")
+
+                location = geolocator.geocode(
+                    query,
+                    timeout=10
+                )
+
+                if location:
+
+                    print("\n✅ LOCATION FOUND")
+                    print(f"LAT: {location.latitude}")
+                    print(f"LON: {location.longitude}")
+
+                    return {
+
+                        "latitude": float(location.latitude),
+
+                        "longitude": float(location.longitude)
+                    }
+
+                else:
+
+                    print("❌ No result")
+
+            except (
+                GeocoderTimedOut,
+                GeocoderServiceError
+            ) as e:
+
+                print(f"\n⚠️ Geocoder error: {e}")
+
+                continue
+
+        print("\n🚨 ALL GEOCODING ATTEMPTS FAILED")
+
+        # IMPORTANT:
+        # DO NOT RETURN FAKE COORDS
         return {
 
             "latitude": None,
@@ -73,7 +91,7 @@ def get_coordinates(location_text):
 
     except Exception as e:
 
-        print("\nGEOCODER ERROR:")
+        print("\n❌ GEOCODER FATAL ERROR")
         print(str(e))
 
         return {
