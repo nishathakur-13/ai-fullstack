@@ -7,14 +7,38 @@ from folium.plugins import AntPath
 from geopy.geocoders import Nominatim
 
 from streamlit_folium import st_folium
-from streamlit_geolocation import streamlit_geolocation
-
 geolocator = Nominatim(user_agent="civicai_nav")
 
 
 API_URL = os.getenv(
     "BACKEND_API_URL",
     "https://backend-api-duvj.onrender.com"
+)
+
+components.html(
+    """
+    <script>
+
+    window.addEventListener("message", (event) => {
+
+        if(event.data.type === "LIVE_LOCATION"){
+
+            localStorage.setItem(
+                "live_lat",
+                event.data.latitude
+            );
+
+            localStorage.setItem(
+                "live_lon",
+                event.data.longitude
+            );
+        }
+
+    });
+
+    </script>
+    """,
+    height=0
 )
 
 
@@ -563,19 +587,12 @@ with tab2:
     # GPS
     # =================================================
 
-    geo_col, lbl_col = st.columns([0.055, 0.945])
-    with geo_col:
-        geo = streamlit_geolocation()
-    with lbl_col:
-        st.markdown(
-            "<div style='padding-top:10px; font-size:13px; color:#8b949e;'>"
-            "📡 Click to detect your live GPS location</div>",
-            unsafe_allow_html=True
-        )
+    lat = st.query_params.get("lat")
+    lon = st.query_params.get("lon")
 
-    if geo["latitude"] is not None:
-        user_lat = geo["latitude"]
-        user_lon = geo["longitude"]
+    if lat is not None and lon is not None:
+        user_lat = float(lat)
+        user_lon = float(lon)
         detected_location = safe_location(None, user_lat, user_lon)
         is_live = True
     else:
