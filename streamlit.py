@@ -40,12 +40,9 @@ st.markdown("""
 /* Base background */
 [data-testid="stAppViewContainer"] { background: #0d1117; }
 [data-testid="stHeader"]           { background: #0d1117 !important; border-bottom: 1px solid #21262d; }
-[data-testid="stMainBlockContainer"]{ padding-top: 24px !important; }
+[data-testid="stMainBlockContainer"]{ padding-top: 60px !important; }
 #MainMenu, footer, [data-testid="stToolbar"],
 [data-testid="stDecoration"]        { display: none !important; }
-
-/* Force all iframes (components.html) to fill full width */
-iframe { width: 100% !important; min-width: 100% !important; }
 
 /* Tabs */
 [data-testid="stTabs"] button[role="tab"] {
@@ -140,18 +137,18 @@ hr { border-color: #21262d !important; margin: 24px 0 !important; }
 st.markdown("""
 <div style="display:flex; align-items:center; gap:14px; padding:0 0 20px 0;">
   <div style="
-    width:42px; height:42px;
+    width:54px; height:54px;
     background:linear-gradient(135deg,#1f6feb,#388bfd);
-    border-radius:10px;
+    border-radius:12px;
     display:flex; align-items:center; justify-content:center;
-    font-size:20px; flex-shrink:0;
+    font-size:26px; flex-shrink:0;
     box-shadow: 0 4px 12px rgba(31,111,235,0.4);
   ">🚨</div>
   <div>
-    <div style="font-size:22px; font-weight:800; color:#e6edf3; letter-spacing:-0.3px; line-height:1.2;">
+    <div style="font-size:32px; font-weight:800; color:#e6edf3; letter-spacing:-0.3px; line-height:1.2;">
       CivicAI Complaint System
     </div>
-    <div style="font-size:12px; color:#8b949e; margin-top:2px;">
+    <div style="font-size:14px; color:#8b949e; margin-top:2px;">
       Multi-Agent AI &nbsp;·&nbsp; Real-time &nbsp;·&nbsp; Location-aware
     </div>
   </div>
@@ -827,7 +824,7 @@ with tab2:
                                     text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">
                           📏 Distance
                         </div>
-                        <div style="font-size:22px; font-weight:800; color:#e6edf3;">{dist} km</div>
+                        <div style="font-size:22px; font-weight:800; color:#e6edf3;" id="live-dist-card">{dist} km</div>
                       </div>
                       <div style="width:1px; background:#21262d; align-self:stretch; margin:0 8px;"></div>
                       <div style="flex:1; text-align:center;">
@@ -835,7 +832,7 @@ with tab2:
                                     text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">
                           ⏱ Drive Time
                         </div>
-                        <div style="font-size:22px; font-weight:800; color:#e6edf3;">{dur} mins</div>
+                        <div style="font-size:22px; font-weight:800; color:#e6edf3;" id="live-eta-card">{dur} mins</div>
                       </div>
                       <div style="width:1px; background:#21262d; align-self:stretch; margin:0 8px;"></div>
                       <div style="flex:1; text-align:center;">
@@ -917,12 +914,7 @@ with tab2:
         # MAPS SIDE BY SIDE
         # =================================================
 
-        st.markdown("""
-        <style>
-        iframe { width: 100% !important; }
-        </style>
-        <div style='height:8px'></div>
-        """, unsafe_allow_html=True)
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
         import json as _json
         _dest_lat = float(sel_lat) if route_data else user_lat
@@ -969,7 +961,10 @@ html,body{{margin:0;padding:0;background:#0d1117;width:100%;overflow:hidden}}
   </div>
   <div class="map-box">
     <div class="map-label">🚗 Live Route Map</div>
-    <div id="map2" class="map"></div>
+    <div style="position:relative">
+      <div id="map2" class="map"></div>
+      <button id="start-btn" onclick="startNav()" style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);z-index:1000;background:#2563eb;color:#fff;border:none;border-radius:24px;padding:10px 24px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(37,99,235,0.5)">▶ Start Navigation</button>
+    </div>
   </div>
 </div>
 <script>
@@ -1004,35 +999,51 @@ const userMarker=L.marker(INIT,{{icon:userIcon,zIndexOffset:1000}}).bindTooltip(
 let routeLine=routeCoords.length?L.polyline(routeCoords,{{color:'#facc15',weight:5,opacity:0.85}}).addTo(map2):null;
 setTimeout(()=>{{map1.invalidateSize();map2.invalidateSize();if(routeLine)map2.fitBounds(routeLine.getBounds(),{{padding:[30,30]}});}},300);
 
+// Prime speechSynthesis on first user interaction (required by browsers)
 // ── Live tracking ─────────────────────────────────
 function haversine(a,b){{const R=6371000,dLat=(b[0]-a[0])*Math.PI/180,dLon=(b[1]-a[1])*Math.PI/180;const s=Math.sin(dLat/2)**2+Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLon/2)**2;return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));}}
 function minDistToRoute(pos){{if(!routeCoords.length)return 0;let min=Infinity;for(let i=0;i<routeCoords.length-1;i++){{const a=routeCoords[i],b=routeCoords[i+1],dx=b[1]-a[1],dy=b[0]-a[0],len2=dx*dx+dy*dy;let t=len2?Math.max(0,Math.min(1,((pos[1]-a[1])*dx+(pos[0]-a[0])*dy)/len2)):0;min=Math.min(min,haversine(pos,[a[0]+t*dy,a[1]+t*dx]));}}return min;}}
 function headingWaypoint(from,to,d){{const R=6371000,la=from[0]*Math.PI/180,lo=from[1]*Math.PI/180,br=Math.atan2(Math.sin((to[1]-from[1])*Math.PI/180)*Math.cos(to[0]*Math.PI/180),Math.cos(from[0]*Math.PI/180)*Math.sin(to[0]*Math.PI/180)-Math.sin(from[0]*Math.PI/180)*Math.cos(to[0]*Math.PI/180)*Math.cos((to[1]-from[1])*Math.PI/180)),dd=d/R,la2=Math.asin(Math.sin(la)*Math.cos(dd)+Math.cos(la)*Math.sin(dd)*Math.cos(br));return[la2*180/Math.PI,(lo+Math.atan2(Math.sin(br)*Math.sin(dd)*Math.cos(la),Math.cos(dd)-Math.sin(la)*Math.sin(la2)))*180/Math.PI];}}
 let stepIdx=0,lastSpoken='',rerouting=false,lastPos=null;
-function speak(t){{if(t===lastSpoken)return;lastSpoken=t;window.parent.postMessage({{type:'speak',text:t}},'*');}}
+function speak(t){{if(t===lastSpoken)return;lastSpoken=t;const u=new SpeechSynthesisUtterance(t);u.lang='en-IN';u.rate=0.9;u.pitch=1;u.volume=1;window.speechSynthesis.cancel();window.speechSynthesis.speak(u);}}
 function updateNav(){{if(!steps.length)return;while(stepIdx<steps.length-1&&steps[stepIdx].distance<30)stepIdx++;const s=steps[stepIdx];speak((s.instruction||'Continue')+(s.road?' on '+s.road:'')+(s.distance?', in '+s.distance+' meters':''));}}
-async function reroute(lat,lon){{if(rerouting)return;rerouting=true;speak('Rerouting');try{{let via='';if(lastPos&&haversine(lastPos,[lat,lon])>5){{const wp=headingWaypoint(lastPos,[lat,lon],200);via=wp[1]+','+wp[0]+';';}}const r=await fetch('https://router.project-osrm.org/route/v1/driving/'+lon+','+lat+';'+via+DEST[1]+','+DEST[0]+'?overview=full&geometries=geojson&steps=true');const d=await r.json();if(routeLine)map2.removeLayer(routeLine);routeLine=L.polyline(d.routes[0].geometry.coordinates.map(c=>[c[1],c[0]]),{{color:'#facc15',weight:5,opacity:0.85}}).addTo(map2);routeCoords.length=0;d.routes[0].geometry.coordinates.forEach(c=>routeCoords.push([c[1],c[0]]));steps.length=0;stepIdx=0;for(const leg of d.routes[0].legs)for(const step of leg.steps){{const m=step.maneuver||{{}};steps.push({{instruction:m.instruction||(m.type||'Continue'),road:step.name||step.ref||'the road ahead',distance:Math.round(step.distance||0)}});}}}}catch(e){{console.error(e);}}rerouting=false;}}
-navigator.geolocation.watchPosition(pos=>{{
-  const lat=pos.coords.latitude,lon=pos.coords.longitude;
-  userMarker.setLatLng([lat,lon]);
-  map2.panTo([lat,lon],{{animate:true,duration:0.5}});
-  map1.panTo([lat,lon],{{animate:true,duration:0.5}});
-  if(steps.length&&stepIdx<steps.length)steps[stepIdx].distance=Math.max(0,Math.round(haversine([lat,lon],DEST)));
-  updateNav();
-  if(minDistToRoute([lat,lon])>30)reroute(lat,lon);
-  lastPos=[lat,lon];
-}},err=>console.error(err),{{enableHighAccuracy:true,maximumAge:0,timeout:5000}});
+async function reroute(lat,lon){{if(rerouting)return;rerouting=true;speak('Rerouting');try{{let via='';if(lastPos&&haversine(lastPos,[lat,lon])>5){{const wp=headingWaypoint(lastPos,[lat,lon],200);via=wp[1]+','+wp[0]+';';}}const r=await fetch('https://router.project-osrm.org/route/v1/driving/'+lon+','+lat+';'+via+DEST[1]+','+DEST[0]+'?overview=full&geometries=geojson&steps=true');const d=await r.json();const route=d.routes[0];if(routeLine)map2.removeLayer(routeLine);routeLine=L.polyline(route.geometry.coordinates.map(c=>[c[1],c[0]]),{{color:'#facc15',weight:5,opacity:0.85}}).addTo(map2);routeCoords.length=0;route.geometry.coordinates.forEach(c=>routeCoords.push([c[1],c[0]]));steps.length=0;stepIdx=0;for(const leg of route.legs)for(const step of leg.steps){{const m=step.maneuver||{{}};steps.push({{instruction:m.instruction||(m.type||'Continue'),road:step.name||step.ref||'the road ahead',distance:Math.round(step.distance||0)}});}}
+  document.getElementById('live-dist').textContent=(route.distance/1000).toFixed(2);
+  document.getElementById('live-eta').textContent=(route.duration/60).toFixed(1);
+  window.parent.postMessage({{type:'eta',dist:(route.distance/1000).toFixed(2),eta:(route.duration/60).toFixed(1)}},'*');
+  }}catch(e){{console.error(e);}}rerouting=false;}}
+function startNav(){{
+  document.getElementById('start-btn').style.display='none';
+  const go=()=>{{
+    const u=new SpeechSynthesisUtterance('Navigation started. Follow the route.');
+    u.lang='en-IN';u.rate=0.9;u.volume=1;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+    navigator.geolocation.watchPosition(pos=>{{
+      const lat=pos.coords.latitude,lon=pos.coords.longitude;
+      userMarker.setLatLng([lat,lon]);
+      map2.panTo([lat,lon],{{animate:true,duration:0.5}});
+      map1.panTo([lat,lon],{{animate:true,duration:0.5}});
+      if(steps.length&&stepIdx<steps.length)steps[stepIdx].distance=Math.max(0,Math.round(haversine([lat,lon],DEST)));
+      window.parent.postMessage({{type:'eta',dist:(haversine([lat,lon],DEST)/1000).toFixed(2),eta:null}},'*');
+      updateNav();
+      if(minDistToRoute([lat,lon])>30)reroute(lat,lon);
+      lastPos=[lat,lon];
+    }},err=>console.error(err),{{enableHighAccuracy:true,maximumAge:0,timeout:5000}});
+  }};
+  const voices=window.speechSynthesis.getVoices();
+  if(voices.length){{go();}}else{{window.speechSynthesis.onvoiceschanged=go;}}
+}}
 </script></body></html>""", height=460, width=10000, scrolling=False)
 
-        # Parent-page speech listener — receives postMessage from iframe and speaks
+        # Listen for live distance/ETA updates from map iframe → update green card
         components.html("""<script>
 window.addEventListener('message', e => {
-  if(e.data && e.data.type === 'speak') {
-    const u = new SpeechSynthesisUtterance(e.data.text);
-    u.rate = 1; u.pitch = 1; u.volume = 1;
-    speechSynthesis.cancel();
-    speechSynthesis.speak(u);
-  }
+  if(!e.data || e.data.type !== 'eta') return;
+  const d = document.getElementById('live-dist-card');
+  const t = document.getElementById('live-eta-card');
+  if(d && e.data.dist) d.textContent = e.data.dist + ' km';
+  if(t && e.data.eta)  t.textContent = e.data.eta  + ' mins';
 });
 </script>""", height=0)
 
