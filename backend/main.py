@@ -114,3 +114,7 @@ async def fetch_complaints():
         print(str(e))
 
         return []
+
+@app.get("/ping")
+def ping():
+    return {"status": "alive"}
