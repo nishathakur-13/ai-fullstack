@@ -15,32 +15,6 @@ API_URL = os.getenv(
     "https://backend-api-duvj.onrender.com"
 )
 
-components.html(
-    """
-    <script>
-
-    window.addEventListener("message", (event) => {
-
-        if(event.data.type === "LIVE_LOCATION"){
-
-            localStorage.setItem(
-                "live_lat",
-                event.data.latitude
-            );
-
-            localStorage.setItem(
-                "live_lon",
-                event.data.longitude
-            );
-        }
-
-    });
-
-    </script>
-    """,
-    height=0
-)
-
 
 # =====================================================
 # PAGE CONFIG
@@ -250,7 +224,7 @@ def safe_location(location, lat, lon):
     return location
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def get_route(start_lat, start_lon, end_lat, end_lon):
 
     try:
@@ -589,6 +563,11 @@ with tab2:
 
     lat = st.query_params.get("lat")
     lon = st.query_params.get("lon")
+
+    # Only auto-refresh if GPS coords not yet received
+    if lat is None or lon is None:
+        from streamlit_autorefresh import st_autorefresh
+        st_autorefresh(interval=30000, key="gps_refresh")
 
     if lat is not None and lon is not None:
         user_lat = float(lat)
@@ -1021,76 +1000,48 @@ setTimeout(()=>{{map1.invalidateSize();map2.invalidateSize();if(routeLine)map2.f
 function haversine(a,b){{const R=6371000,dLat=(b[0]-a[0])*Math.PI/180,dLon=(b[1]-a[1])*Math.PI/180;const s=Math.sin(dLat/2)**2+Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLon/2)**2;return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));}}
 function minDistToRoute(pos){{if(!routeCoords.length)return 0;let min=Infinity;for(let i=0;i<routeCoords.length-1;i++){{const a=routeCoords[i],b=routeCoords[i+1],dx=b[1]-a[1],dy=b[0]-a[0],len2=dx*dx+dy*dy;let t=len2?Math.max(0,Math.min(1,((pos[1]-a[1])*dx+(pos[0]-a[0])*dy)/len2)):0;min=Math.min(min,haversine(pos,[a[0]+t*dy,a[1]+t*dx]));}}return min;}}
 function headingWaypoint(from,to,d){{const R=6371000,la=from[0]*Math.PI/180,lo=from[1]*Math.PI/180,br=Math.atan2(Math.sin((to[1]-from[1])*Math.PI/180)*Math.cos(to[0]*Math.PI/180),Math.cos(from[0]*Math.PI/180)*Math.sin(to[0]*Math.PI/180)-Math.sin(from[0]*Math.PI/180)*Math.cos(to[0]*Math.PI/180)*Math.cos((to[1]-from[1])*Math.PI/180)),dd=d/R,la2=Math.asin(Math.sin(la)*Math.cos(dd)+Math.cos(la)*Math.sin(dd)*Math.cos(br));return[la2*180/Math.PI,(lo+Math.atan2(Math.sin(br)*Math.sin(dd)*Math.cos(la),Math.cos(dd)-Math.sin(la)*Math.sin(la2)))*180/Math.PI];}}
-let stepIdx=0,lastSpoken='',rerouting=false,lastPos=null;
+let stepIdx=0,lastSpoken='',rerouting=false,lastPos=null, navActive = false;
+
 window.addEventListener("message", (event) => {{
+  if(event.data.type === "LIVE_LOCATION"){{
+    const lat = event.data.latitude;
+    const lon = event.data.longitude;
 
-    if(event.data.type === "LIVE_LOCATION"){{
+    userMarker.setLatLng([lat, lon]);
+    map2.panTo([lat, lon], {{ animate: true, duration: 0.5 }});
+    map1.panTo([lat, lon], {{ animate: true, duration: 0.5 }});
 
-        const lat = event.data.latitude;
-
-        const lon = event.data.longitude;
-
-        userMarker.setLatLng([lat, lon]);
-
-        map2.panTo([lat, lon], {{
-            animate: true,
-            duration: 0.5
-        }});
-
-        map1.panTo([lat, lon], {{
-            animate: true,
-            duration: 0.5
-        }});
-
-        if(steps.length && stepIdx < steps.length){{
-            steps[stepIdx].distance = Math.max(
-                0,
-                Math.round(
-                    haversine([lat, lon], DEST)
-                )
-            );
-        }}
-
-        updateNav();
-
-        if(minDistToRoute([lat, lon]) > 30){{
-            reroute(lat, lon);
-        }}
-
-        lastPos = [lat, lon];
+    if(navActive){{
+      if(steps.length && stepIdx < steps.length){{
+        steps[stepIdx].distance = Math.max(0, Math.round(haversine([lat, lon], DEST)));
+      }}
+      updateNav();
+      if(minDistToRoute([lat, lon]) > 30){{ reroute(lat, lon); }}
     }}
+    lastPos = [lat, lon];
+  }}
 }});
 function speak(t){{if(t===lastSpoken)return;lastSpoken=t;const u=new SpeechSynthesisUtterance(t);u.lang='en-IN';u.rate=0.9;u.pitch=1;u.volume=1;window.speechSynthesis.cancel();window.speechSynthesis.speak(u);}}
 function updateNav(){{if(!steps.length)return;while(stepIdx<steps.length-1&&steps[stepIdx].distance<30)stepIdx++;const s=steps[stepIdx];speak((s.instruction||'Continue')+(s.road?' on '+s.road:'')+(s.distance?', in '+s.distance+' meters':''));}}
 async function reroute(lat,lon){{if(rerouting)return;rerouting=true;speak('Rerouting');try{{let via='';if(lastPos&&haversine(lastPos,[lat,lon])>5){{const wp=headingWaypoint(lastPos,[lat,lon],200);via=wp[1]+','+wp[0]+';';}}const r=await fetch('https://router.project-osrm.org/route/v1/driving/'+lon+','+lat+';'+via+DEST[1]+','+DEST[0]+'?overview=full&geometries=geojson&steps=true');const d=await r.json();const route=d.routes[0];if(routeLine)map2.removeLayer(routeLine);routeLine=L.polyline(route.geometry.coordinates.map(c=>[c[1],c[0]]),{{color:'#facc15',weight:5,opacity:0.85}}).addTo(map2);routeCoords.length=0;route.geometry.coordinates.forEach(c=>routeCoords.push([c[1],c[0]]));steps.length=0;stepIdx=0;for(const leg of route.legs)for(const step of leg.steps){{const m=step.maneuver||{{}};steps.push({{instruction:m.instruction||(m.type||'Continue'),road:step.name||step.ref||'the road ahead',distance:Math.round(step.distance||0)}});}}
-  document.getElementById('live-dist').textContent=(route.distance/1000).toFixed(2);
-  document.getElementById('live-eta').textContent=(route.duration/60).toFixed(1);
-  window.parent.postMessage({{type:'eta',dist:(route.distance/1000).toFixed(2),eta:(route.duration/60).toFixed(1)}},'*');
+  const d_card = document.getElementById('live-dist-card');
+  const t_card = document.getElementById('live-eta-card');
+  if (d_card) d_card.textContent = (route.distance/1000).toFixed(2) + ' km';
+  if (t_card) t_card.textContent = (route.duration/60).toFixed(1) + ' mins';
   }}catch(e){{console.error(e);}}rerouting=false;}}
 function startNav(){{
   document.getElementById('start-btn').style.display='none';
+  navActive = true;
   const go=()=>{{
     const u=new SpeechSynthesisUtterance('Navigation started. Follow the route.');
-    u.lang='en-IN';u.rate=0.9;u.volume=1;
+    u.lang='en-IN'; u.rate=0.9; u.volume=1;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
-    
   }};
   const voices=window.speechSynthesis.getVoices();
-  if(voices.length){{go();}}else{{window.speechSynthesis.onvoiceschanged=go;}}
+  if(voices.length){{ go(); }} else {{ window.speechSynthesis.onvoiceschanged=go; }}
 }}
 </script></body></html>""", height=460, width=10000, scrolling=False)
-
-        # Listen for live distance/ETA updates from map iframe → update green card
-        components.html("""<script>
-window.addEventListener('message', e => {
-  if(!e.data || e.data.type !== 'eta') return;
-  const d = document.getElementById('live-dist-card');
-  const t = document.getElementById('live-eta-card');
-  if(d && e.data.dist) d.textContent = e.data.dist + ' km';
-  if(t && e.data.eta)  t.textContent = e.data.eta  + ' mins';
-});
-</script>""", height=0)
 
         if route_data and route_data.get("steps"):
             s = route_data["steps"][0]
@@ -1181,3 +1132,4 @@ window.addEventListener('message', e => {
 
     except Exception as e:
         st.error(f"Error loading dashboard: {e}")
+        
