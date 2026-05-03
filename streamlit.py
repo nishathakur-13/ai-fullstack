@@ -5,16 +5,14 @@ import streamlit.components.v1 as components
 import folium
 from folium.plugins import AntPath
 from geopy.geocoders import Nominatim
-
 from streamlit_folium import st_folium
-geolocator = Nominatim(user_agent="civicai_nav")
 
+geolocator = Nominatim(user_agent="civicai_nav")
 
 API_URL = os.getenv(
     "BACKEND_API_URL",
     "https://backend-api-duvj.onrender.com"
 )
-
 
 # =====================================================
 # PAGE CONFIG
@@ -27,22 +25,18 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-
 # =====================================================
-# GLOBAL CSS — dark theme, clean typography
+# GLOBAL CSS
 # =====================================================
 
 st.markdown("""
 <style>
-
-/* Base background */
 [data-testid="stAppViewContainer"] { background: #0d1117; }
 [data-testid="stHeader"]           { background: #0d1117 !important; border-bottom: 1px solid #21262d; }
 [data-testid="stMainBlockContainer"]{ padding-top: 60px !important; }
 #MainMenu, footer, [data-testid="stToolbar"],
 [data-testid="stDecoration"]        { display: none !important; }
 
-/* Tabs */
 [data-testid="stTabs"] button[role="tab"] {
     background: transparent;
     color: #8b949e;
@@ -65,7 +59,6 @@ st.markdown("""
     gap: 4px;
 }
 
-/* Inputs */
 [data-testid="stTextInput"] > div > div > input,
 [data-testid="stTextArea"]  > div > div > textarea {
     background: #161b22 !important;
@@ -82,7 +75,6 @@ st.markdown("""
 }
 label { color: #8b949e !important; font-size: 13px !important; font-weight: 500 !important; }
 
-/* Button */
 [data-testid="stButton"] > button {
     background: #1f6feb !important;
     color: #fff !important;
@@ -100,7 +92,6 @@ label { color: #8b949e !important; font-size: 13px !important; font-weight: 500 
     box-shadow: 0 4px 16px rgba(31,111,235,0.45) !important;
 }
 
-/* Selectbox */
 [data-testid="stSelectbox"] > div > div {
     background: #161b22 !important;
     border: 1px solid #30363d !important;
@@ -108,28 +99,20 @@ label { color: #8b949e !important; font-size: 13px !important; font-weight: 500 
     color: #e6edf3 !important;
 }
 
-/* Alerts */
-[data-testid="stAlert"] {
-    border-radius: 8px !important;
-}
+[data-testid="stAlert"] { border-radius: 8px !important; }
 
-/* Divider */
 hr { border-color: #21262d !important; margin: 24px 0 !important; }
 
-/* Scrollbar */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: #0d1117; }
 ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
 
-/* Spinner text */
 [data-testid="stSpinner"] p { color: #8b949e !important; }
-
 </style>
 """, unsafe_allow_html=True)
 
-
 # =====================================================
-# TITLE — native Streamlit (no iframe)
+# TITLE
 # =====================================================
 
 st.markdown("""
@@ -153,7 +136,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-
 # =====================================================
 # SESSION STATE
 # =====================================================
@@ -163,7 +145,6 @@ if "analysis_result" not in st.session_state:
 
 if "_selected_complaint" not in st.session_state:
     st.session_state["_selected_complaint"] = None
-
 
 # =====================================================
 # HELPERS
@@ -190,7 +171,6 @@ def fetch_complaints():
     response = requests.get(f"{API_URL}/complaints")
     return response.json()
 
-
 @st.cache_data(ttl=3600)
 def reverse_geocode(lat, lon):
     try:
@@ -214,7 +194,6 @@ def reverse_geocode(lat, lon):
     except:
         return None
 
-
 def safe_location(location, lat, lon):
     invalid_values = ["none", "none, none", "null", "null, null", ""]
     if not location or str(location).strip().lower() in invalid_values:
@@ -223,16 +202,9 @@ def safe_location(location, lat, lon):
         return "Location unavailable"
     return location
 
-
 @st.cache_data(ttl=60)
 def get_route(start_lat, start_lon, end_lat, end_lon):
-
     try:
-
-        # -----------------------------------
-        # OSRM ROUTE API
-        # -----------------------------------
-
         url = (
             "https://router.project-osrm.org/"
             f"route/v1/driving/"
@@ -240,56 +212,24 @@ def get_route(start_lat, start_lon, end_lat, end_lon):
             f"{end_lon},{end_lat}"
             f"?overview=full&geometries=geojson&steps=true&annotations=true"
         )
-
-        print("\n======================")
-        print("🚗 ROUTE REQUEST")
-        print("======================")
-        print(url)
-
-        response = requests.get(
-            url,
-            timeout=10
-        )
-
-        print("\nSTATUS CODE:")
-        print(response.status_code)
-
+        response = requests.get(url, timeout=10)
         if response.status_code != 200:
-
-            print("\n❌ ROUTE API FAILED")
-
             return None
-
         data = response.json()
-
-        print("\nROUTE RESPONSE:")
-        print(data)
-
         routes = data.get("routes")
-
         if not routes:
-
-            print("\n❌ NO ROUTES FOUND")
-
             return None
-
         route = routes[0]
         legs = route.get("legs", [])
-
         steps = []
-
         for leg in legs:
-
             for step in leg.get("steps", []):
-
                 maneuver = step.get("maneuver", {})
                 m_type = maneuver.get("type", "")
                 m_mod  = maneuver.get("modifier", "")
-
-                # Road name: prefer name, then ref, then reverse-geocode
                 road_name = step.get("name") or step.get("ref") or ""
                 if not road_name:
-                    loc = maneuver.get("location")  # [lon, lat]
+                    loc = maneuver.get("location")
                     if loc:
                         try:
                             rev = geolocator.reverse(
@@ -309,8 +249,6 @@ def get_route(start_lat, start_lon, end_lat, end_lon):
                             pass
                 if not road_name:
                     road_name = "the road ahead"
-
-                # Build human-readable instruction
                 turn_map = {
                     "turn left":          "Turn left",
                     "turn right":         "Turn right",
@@ -338,49 +276,27 @@ def get_route(start_lat, start_lon, end_lat, end_lon):
                 key = f"{m_type} {m_mod}".strip().lower()
                 verb = turn_map.get(key) or turn_map.get(m_type.lower(), "Continue on")
                 instruction = f"{verb} {road_name}".strip()
-
                 distance = round(step.get("distance", 0))
-
                 steps.append({
                     "instruction": instruction,
                     "road": road_name,
                     "distance": distance
                 })
-
         geometry = route.get("geometry")
-
         if not geometry:
-
-            print("\n❌ NO GEOMETRY FOUND")
-
             return None
-
-        coordinates = geometry.get(
-            "coordinates",
-            []
-        )
-
+        coordinates = geometry.get("coordinates", [])
         if not coordinates:
-
-            print("\n❌ EMPTY COORDINATES")
-
             return None
-
-        print("\n✅ ROUTE SUCCESS")
         return {
             "coordinates": coordinates,
             "steps": steps,
             "distance": round(route.get("distance", 0) / 1000, 2),
             "duration": round(route.get("duration", 0) / 60, 2)
         }
-
     except Exception as e:
-
-        print("\n❌ ROUTE ERROR")
-        print(str(e))
-
+        print(f"ROUTE ERROR: {e}")
         return None
-
 
 URGENCY_CONFIG = {
     "LOW":      {"emoji": "🟢", "color": "#3fb950", "bg": "#0d2b1b", "border": "#238636"},
@@ -394,13 +310,11 @@ FOLIUM_COLOR = {
     "LOW": "green", "MEDIUM": "blue", "HIGH": "orange", "CRITICAL": "red"
 }
 
-
 # =====================================================
 # TABS
 # =====================================================
 
 tab1, tab2 = st.tabs(["📝  Submit Complaint", "📊  Dashboard"])
-
 
 # =====================================================
 # TAB 1 — SUBMIT
@@ -409,12 +323,9 @@ tab1, tab2 = st.tabs(["📝  Submit Complaint", "📊  Dashboard"])
 with tab1:
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-
     left, right = st.columns([1, 1], gap="large")
 
-    # ── LEFT: Form ──────────────────────────────────
     with left:
-
         st.markdown("""
         <div style="margin-bottom:20px;">
           <div style="font-size:18px; font-weight:700; color:#e6edf3; margin-bottom:4px;">
@@ -460,11 +371,8 @@ with tab1:
                     except Exception as e:
                         st.error(str(e))
 
-    # ── RIGHT: Result ────────────────────────────────
     with right:
-
         if st.session_state.analysis_result:
-
             data    = st.session_state.analysis_result
             urgency = data.get("urgency", "UNKNOWN")
             cfg     = URGENCY_CONFIG.get(urgency, URGENCY_CONFIG["UNKNOWN"])
@@ -472,7 +380,6 @@ with tab1:
             eta     = data.get("estimated_resolution_time", "N/A")
             expl    = data.get("explanation", "")
 
-            # Urgency pill
             st.markdown(f"""
             <div style="margin-bottom:16px;">
               <span style="
@@ -484,70 +391,37 @@ with tab1:
             </div>
             """, unsafe_allow_html=True)
 
-            # Department + ETA
             m1, m2 = st.columns(2)
             with m1:
                 st.markdown(f"""
-                <div style="
-                  background:#161b22; border:1px solid #21262d; border-radius:10px;
-                  padding:16px 18px; margin-bottom:12px;
-                ">
-                  <div style="font-size:11px; color:#8b949e; font-weight:600;
-                              text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">
-                    🏢 Department
-                  </div>
+                <div style="background:#161b22; border:1px solid #21262d; border-radius:10px; padding:16px 18px; margin-bottom:12px;">
+                  <div style="font-size:11px; color:#8b949e; font-weight:600; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">🏢 Department</div>
                   <div style="font-size:18px; font-weight:700; color:#e6edf3;">{dept}</div>
                 </div>
                 """, unsafe_allow_html=True)
             with m2:
                 st.markdown(f"""
-                <div style="
-                  background:#161b22; border:1px solid #21262d; border-radius:10px;
-                  padding:16px 18px; margin-bottom:12px;
-                ">
-                  <div style="font-size:11px; color:#8b949e; font-weight:600;
-                              text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">
-                    ⏳ Resolution ETA
-                  </div>
+                <div style="background:#161b22; border:1px solid #21262d; border-radius:10px; padding:16px 18px; margin-bottom:12px;">
+                  <div style="font-size:11px; color:#8b949e; font-weight:600; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">⏳ Resolution ETA</div>
                   <div style="font-size:18px; font-weight:700; color:#e6edf3;">{eta}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
-            # Explanation
             st.markdown(f"""
-            <div style="
-              background:#161b22; border:1px solid #21262d;
-              border-left:3px solid #1f6feb;
-              border-radius:10px; padding:16px 18px;
-            ">
-              <div style="font-size:11px; color:#8b949e; font-weight:600;
-                          text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">
-                🧠 AI Explanation
-              </div>
+            <div style="background:#161b22; border:1px solid #21262d; border-left:3px solid #1f6feb; border-radius:10px; padding:16px 18px;">
+              <div style="font-size:11px; color:#8b949e; font-weight:600; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">🧠 AI Explanation</div>
               <div style="font-size:14px; color:#c9d1d9; line-height:1.7;">{expl}</div>
             </div>
             """, unsafe_allow_html=True)
 
         else:
-            # Empty state — uses st.markdown so it respects dark bg
             st.markdown("""
-            <div style="
-              border: 2px dashed #21262d;
-              border-radius: 14px;
-              padding: 56px 32px;
-              text-align: center;
-              margin-top: 32px;
-            ">
+            <div style="border: 2px dashed #21262d; border-radius: 14px; padding: 56px 32px; text-align: center; margin-top: 32px;">
               <div style="font-size:38px; margin-bottom:16px;">🤖</div>
-              <div style="font-size:16px; font-weight:600; color:#e6edf3; margin-bottom:8px;">
-                AI Analysis will appear here
-              </div>
-              <div style="font-size:13px; color:#484f58;">
-                Submit a complaint on the left to get started
-              </div>
+              <div style="font-size:16px; font-weight:600; color:#e6edf3; margin-bottom:8px;">AI Analysis will appear here</div>
+              <div style="font-size:13px; color:#484f58;">Submit a complaint on the left to get started</div>
             </div>
             """, unsafe_allow_html=True)
-
 
 # =====================================================
 # TAB 2 — DASHBOARD
@@ -599,7 +473,6 @@ with tab2:
 
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-    # Location card + stats side by side using native st.markdown
     loc_col, s1, s2, s3, s4 = st.columns([2.2, 0.7, 0.7, 0.7, 0.7], gap="small")
 
     with loc_col:
@@ -619,24 +492,20 @@ with tab2:
             background:radial-gradient(circle, rgba(96,165,250,0.18) 0%, transparent 70%);
             border-radius:50%;"></div>
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
-            <div style="font-size:10px; font-weight:600; letter-spacing:2px;
-                        text-transform:uppercase; opacity:0.6;">📡 Active Location</div>
+            <div style="font-size:10px; font-weight:600; letter-spacing:2px; text-transform:uppercase; opacity:0.6;">📡 Active Location</div>
             <div style="display:flex; align-items:center; gap:5px;
               background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.18);
               border-radius:999px; padding:3px 10px; font-size:10px; font-weight:700;
               letter-spacing:1.2px; text-transform:uppercase;">
-              <div style="width:6px; height:6px; border-radius:50%;
-                background:{dot_color}; box-shadow:0 0 5px {dot_color};"></div>
+              <div style="width:6px; height:6px; border-radius:50%; background:{dot_color}; box-shadow:0 0 5px {dot_color};"></div>
               {dot_label}
             </div>
           </div>
-          <div style="font-size:20px; font-weight:800; line-height:1.3;
-                      word-break:break-word; position:relative; z-index:1;">
+          <div style="font-size:20px; font-weight:800; line-height:1.3; word-break:break-word; position:relative; z-index:1;">
             📍 &nbsp;{detected_location}
           </div>
           {coords_line}
-          <div style="font-size:11px; opacity:0.4; margin-top:10px;
-            border-top:1px solid rgba(255,255,255,0.1); padding-top:8px;">
+          <div style="font-size:11px; opacity:0.4; margin-top:10px; border-top:1px solid rgba(255,255,255,0.1); padding-top:8px;">
             🛰️ GPS via browser geolocation
           </div>
         </div>
@@ -650,10 +519,7 @@ with tab2:
     ]:
         with col:
             st.markdown(f"""
-            <div style="
-              background:#161b22; border:1px solid #21262d; border-radius:12px;
-              padding:16px 14px; text-align:center; height:100%;
-            ">
+            <div style="background:#161b22; border:1px solid #21262d; border-radius:12px; padding:16px 14px; text-align:center; height:100%;">
               <div style="font-size:22px; margin-bottom:6px;">{icon}</div>
               <div style="font-size:24px; font-weight:800; color:#e6edf3; line-height:1;">{val}</div>
               <div style="font-size:11px; color:#8b949e; margin-top:4px;">{lbl}</div>
@@ -685,7 +551,7 @@ with tab2:
         complaints = complaints[:20]
 
         # =================================================
-        # HOTSPOT MAP
+        # BUILD VALID COMPLAINTS + HOTSPOT FOLIUM MAP
         # =================================================
 
         hotspot_map = folium.Map(
@@ -745,10 +611,11 @@ with tab2:
 
         route_map  = None
         route_data = None
+        sel_lat    = user_lat
+        sel_lon    = user_lon
 
         if valid_complaints:
 
-            # Index-based selectbox — avoids duplicate label & dict instability
             complaint_labels = []
             for idx, item in enumerate(valid_complaints):
                 label = (
@@ -766,7 +633,6 @@ with tab2:
 
             selected = valid_complaints[selected_index]
 
-            # Force float — silently breaks Folium if coords are strings
             try:
                 sel_lat = float(selected["latitude"])
                 sel_lon = float(selected["longitude"])
@@ -778,17 +644,11 @@ with tab2:
 
                 if (
                     abs(float(user_lat) - sel_lat) < 0.0001
-                    and
-                    abs(float(user_lon) - sel_lon) < 0.0001
+                    and abs(float(user_lon) - sel_lon) < 0.0001
                 ):
                     st.warning("User and complaint location are identical.")
 
-                route_data = get_route(
-                    float(user_lat),
-                    float(user_lon),
-                    sel_lat,
-                    sel_lon
-                )
+                route_data = get_route(float(user_lat), float(user_lon), sel_lat, sel_lon)
 
                 if route_data:
                     st.session_state["current_route"] = route_data
@@ -798,44 +658,26 @@ with tab2:
                         st.session_state["current_route"] = route_data
 
                 dept = selected.get("department", "N/A")
+                selected_location = safe_location(selected.get("location"), sel_lat, sel_lon)
 
-                selected_location = safe_location(
-                    selected.get("location"),
-                    sel_lat,
-                    sel_lon
-                )
-
-                # ETA banner
                 if route_data:
                     dist = route_data["distance"]
                     dur  = route_data["duration"]
                     st.markdown(f"""
-                    <div style="
-                      background:#0d2b1b; border:1px solid #238636; border-radius:10px;
-                      padding:14px 20px; display:flex; align-items:center;
-                      margin-bottom:12px;
-                    ">
+                    <div style="background:#0d2b1b; border:1px solid #238636; border-radius:10px;
+                      padding:14px 20px; display:flex; align-items:center; margin-bottom:12px;">
                       <div style="flex:1; text-align:center;">
-                        <div style="font-size:10px; color:#3fb950; font-weight:600;
-                                    text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">
-                          📏 Distance
-                        </div>
+                        <div style="font-size:10px; color:#3fb950; font-weight:600; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">📏 Distance</div>
                         <div style="font-size:22px; font-weight:800; color:#e6edf3;" id="live-dist-card">{dist} km</div>
                       </div>
                       <div style="width:1px; background:#21262d; align-self:stretch; margin:0 8px;"></div>
                       <div style="flex:1; text-align:center;">
-                        <div style="font-size:10px; color:#3fb950; font-weight:600;
-                                    text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">
-                          ⏱ Drive Time
-                        </div>
+                        <div style="font-size:10px; color:#3fb950; font-weight:600; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">⏱ Drive Time</div>
                         <div style="font-size:22px; font-weight:800; color:#e6edf3;" id="live-eta-card">{dur} mins</div>
                       </div>
                       <div style="width:1px; background:#21262d; align-self:stretch; margin:0 8px;"></div>
                       <div style="flex:1; text-align:center;">
-                        <div style="font-size:10px; color:#3fb950; font-weight:600;
-                                    text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">
-                          🏢 Department
-                        </div>
+                        <div style="font-size:10px; color:#3fb950; font-weight:600; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">🏢 Department</div>
                         <div style="font-size:18px; font-weight:700; color:#e6edf3;">{dept}</div>
                       </div>
                     </div>
@@ -843,7 +685,6 @@ with tab2:
                 else:
                     st.warning("Could not fetch driving route. Showing markers only.")
 
-                # Always build map
                 mid_lat = (float(user_lat) + sel_lat) / 2
                 mid_lon = (float(user_lon) + sel_lon) / 2
 
@@ -853,22 +694,11 @@ with tab2:
                     attr="Esri"
                 )
 
-                # Route line if OSRM succeeded
                 if route_data:
-                    points = [
-                        [coord[1], coord[0]]
-                        for coord in route_data["coordinates"]
-                    ]
-                    AntPath(
-                        locations=points,
-                        color="yellow",
-                        pulse_color="red",
-                        weight=6,
-                        delay=800
-                    ).add_to(route_map)
+                    points = [[coord[1], coord[0]] for coord in route_data["coordinates"]]
+                    AntPath(locations=points, color="yellow", pulse_color="red", weight=6, delay=800).add_to(route_map)
                     route_map.fit_bounds(points)
 
-                # Your location marker
                 folium.Marker(
                     [float(user_lat), float(user_lon)],
                     popup="📍 Your Location",
@@ -876,7 +706,6 @@ with tab2:
                     icon=folium.Icon(color="blue")
                 ).add_to(route_map)
 
-                # Complaint marker
                 popup_route = f"""
                 <div style="width:250px;">
                     <b>Complaint:</b><br>{selected.get('complaint_text', '')}<br><br>
@@ -893,7 +722,9 @@ with tab2:
                 ).add_to(route_map)
 
         # =================================================
-        # Force maps iframe to full width via JS (CSS can't override inline width attr)
+        # LEAFLET MAPS — SIDE BY SIDE (LIVE GPS INSIDE)
+        # =================================================
+
         components.html("""<script>
 (function(){
   function fixWidth(){
@@ -907,37 +738,31 @@ with tab2:
 })();
 </script>""", height=0)
 
-        # MAPS SIDE BY SIDE
-        # =================================================
-
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
         import json as _json
-        _dest_lat = float(sel_lat) if route_data else user_lat
-        _dest_lon = float(sel_lon) if route_data else user_lon
-        _route_coords_js = _json.dumps(
-            [[c[1], c[0]] for c in route_data["coordinates"]] if route_data else []
-        )
-        _steps_js = _json.dumps(route_data["steps"] if route_data else [])
+        _dest_lat        = float(sel_lat)
+        _dest_lon        = float(sel_lon)
+        _route_coords_js = _json.dumps([[c[1], c[0]] for c in route_data["coordinates"]] if route_data else [])
+        _steps_js        = _json.dumps(route_data["steps"] if route_data else [])
 
-        # Build complaint markers JSON for hotspot map
         _hotspot_markers = []
         for item in valid_complaints:
             try:
                 _hotspot_markers.append({
-                    "lat": float(item.get("latitude")),
-                    "lon": float(item.get("longitude")),
+                    "lat":     float(item.get("latitude")),
+                    "lon":     float(item.get("longitude")),
                     "urgency": item.get("urgency", "LOW"),
-                    "text": item.get("complaint_text", "")[:80],
-                    "dept": item.get("department", "N/A"),
+                    "text":    item.get("complaint_text", "")[:80],
+                    "dept":    item.get("department", "N/A"),
                 })
             except (TypeError, ValueError):
                 continue
-        _markers_js = _json.dumps(_hotspot_markers)
 
-        _urgency_colors = _json.dumps({
+        _markers_js      = _json.dumps(_hotspot_markers)
+        _urgency_colors  = _json.dumps({
             "CRITICAL": "#ef4444", "HIGH": "#f97316",
-            "MEDIUM": "#eab308", "LOW": "#22c55e"
+            "MEDIUM": "#eab308",   "LOW": "#22c55e"
         })
 
         components.html(f"""<!DOCTYPE html><html><head><meta charset="utf-8"/>
@@ -972,7 +797,7 @@ const steps={_steps_js};
 const markers={_markers_js};
 const COLORS={_urgency_colors};
 
-// ── Map 1: Hotspot ────────────────────────────────
+// ── Map 1: Hotspot ─────────────────────────────────────────────
 const map1=L.map('map1').setView(INIT,13);
 L.tileLayer(TILES,{{maxZoom:19,attribution:'Esri'}}).addTo(map1);
 L.marker(INIT,{{icon:L.divIcon({{html:'<div style="font-size:20px">📍</div>',iconSize:[24,24],iconAnchor:[12,12],className:''}})}}
@@ -985,7 +810,7 @@ markers.forEach(m=>{{
    .addTo(map1);
 }});
 
-// ── Map 2: Live Route ─────────────────────────────
+// ── Map 2: Live Route ──────────────────────────────────────────
 const map2=L.map('map2').setView(INIT,15);
 L.tileLayer(TILES,{{maxZoom:19,attribution:'Esri'}}).addTo(map2);
 L.marker(DEST,{{icon:L.divIcon({{html:'<div style="font-size:24px">🚨</div>',iconSize:[28,28],iconAnchor:[14,14],className:''}})}}
@@ -995,51 +820,66 @@ const userMarker=L.marker(INIT,{{icon:userIcon,zIndexOffset:1000}}).bindTooltip(
 let routeLine=routeCoords.length?L.polyline(routeCoords,{{color:'#facc15',weight:5,opacity:0.85}}).addTo(map2):null;
 setTimeout(()=>{{map1.invalidateSize();map2.invalidateSize();if(routeLine)map2.fitBounds(routeLine.getBounds(),{{padding:[30,30]}});}},300);
 
-// Prime speechSynthesis on first user interaction (required by browsers)
-// ── Live tracking ─────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────
 function haversine(a,b){{const R=6371000,dLat=(b[0]-a[0])*Math.PI/180,dLon=(b[1]-a[1])*Math.PI/180;const s=Math.sin(dLat/2)**2+Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLon/2)**2;return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));}}
 function minDistToRoute(pos){{if(!routeCoords.length)return 0;let min=Infinity;for(let i=0;i<routeCoords.length-1;i++){{const a=routeCoords[i],b=routeCoords[i+1],dx=b[1]-a[1],dy=b[0]-a[0],len2=dx*dx+dy*dy;let t=len2?Math.max(0,Math.min(1,((pos[1]-a[1])*dx+(pos[0]-a[0])*dy)/len2)):0;min=Math.min(min,haversine(pos,[a[0]+t*dy,a[1]+t*dx]));}}return min;}}
 function headingWaypoint(from,to,d){{const R=6371000,la=from[0]*Math.PI/180,lo=from[1]*Math.PI/180,br=Math.atan2(Math.sin((to[1]-from[1])*Math.PI/180)*Math.cos(to[0]*Math.PI/180),Math.cos(from[0]*Math.PI/180)*Math.sin(to[0]*Math.PI/180)-Math.sin(from[0]*Math.PI/180)*Math.cos(to[0]*Math.PI/180)*Math.cos((to[1]-from[1])*Math.PI/180)),dd=d/R,la2=Math.asin(Math.sin(la)*Math.cos(dd)+Math.cos(la)*Math.sin(dd)*Math.cos(br));return[la2*180/Math.PI,(lo+Math.atan2(Math.sin(br)*Math.sin(dd)*Math.cos(la),Math.cos(dd)-Math.sin(la)*Math.sin(la2)))*180/Math.PI];}}
-let stepIdx=0,lastSpoken='',rerouting=false,lastPos=null, navActive = false;
 
-window.addEventListener("message", (event) => {{
-  if(event.data.type === "LIVE_LOCATION"){{
-    const lat = event.data.latitude;
-    const lon = event.data.longitude;
+let stepIdx=0,lastSpoken='',rerouting=false,lastPos=null,navActive=false;
 
-    userMarker.setLatLng([lat, lon]);
-    map2.panTo([lat, lon], {{ animate: true, duration: 0.5 }});
-    map1.panTo([lat, lon], {{ animate: true, duration: 0.5 }});
-
-    if(navActive){{
-      if(steps.length && stepIdx < steps.length){{
-        steps[stepIdx].distance = Math.max(0, Math.round(haversine([lat, lon], DEST)));
-      }}
-      updateNav();
-      if(minDistToRoute([lat, lon]) > 30){{ reroute(lat, lon); }}
+// ── Core GPS handler — called from BOTH sources ────────────────
+function onGpsUpdate(lat,lon){{
+  userMarker.setLatLng([lat,lon]);
+  map2.panTo([lat,lon],{{animate:true,duration:0.5}});
+  map1.panTo([lat,lon],{{animate:true,duration:0.5}});
+  if(navActive){{
+    if(steps.length&&stepIdx<steps.length){{
+      steps[stepIdx].distance=Math.max(0,Math.round(haversine([lat,lon],DEST)));
     }}
-    lastPos = [lat, lon];
+    updateNav();
+    if(minDistToRoute([lat,lon])>30){{reroute(lat,lon);}}
+  }}
+  lastPos=[lat,lon];
+}}
+
+// ── Source 1: Direct watchPosition inside this iframe ─────────
+// Works because Streamlit components.html is served on same origin
+// and inherits geolocation permission from the parent page
+if(navigator.geolocation){{
+  navigator.geolocation.watchPosition(
+    (pos)=>onGpsUpdate(pos.coords.latitude,pos.coords.longitude),
+    (err)=>console.warn('iframe GPS:',err.message),
+    {{enableHighAccuracy:true,maximumAge:0,timeout:10000}}
+  );
+}}
+
+// ── Source 2: postMessage from index.html (always-on fallback) ─
+window.addEventListener("message",(event)=>{{
+  if(event.data&&event.data.type==="LIVE_LOCATION"){{
+    onGpsUpdate(event.data.latitude,event.data.longitude);
   }}
 }});
+
 function speak(t){{if(t===lastSpoken)return;lastSpoken=t;const u=new SpeechSynthesisUtterance(t);u.lang='en-IN';u.rate=0.9;u.pitch=1;u.volume=1;window.speechSynthesis.cancel();window.speechSynthesis.speak(u);}}
 function updateNav(){{if(!steps.length)return;while(stepIdx<steps.length-1&&steps[stepIdx].distance<30)stepIdx++;const s=steps[stepIdx];speak((s.instruction||'Continue')+(s.road?' on '+s.road:'')+(s.distance?', in '+s.distance+' meters':''));}}
 async function reroute(lat,lon){{if(rerouting)return;rerouting=true;speak('Rerouting');try{{let via='';if(lastPos&&haversine(lastPos,[lat,lon])>5){{const wp=headingWaypoint(lastPos,[lat,lon],200);via=wp[1]+','+wp[0]+';';}}const r=await fetch('https://router.project-osrm.org/route/v1/driving/'+lon+','+lat+';'+via+DEST[1]+','+DEST[0]+'?overview=full&geometries=geojson&steps=true');const d=await r.json();const route=d.routes[0];if(routeLine)map2.removeLayer(routeLine);routeLine=L.polyline(route.geometry.coordinates.map(c=>[c[1],c[0]]),{{color:'#facc15',weight:5,opacity:0.85}}).addTo(map2);routeCoords.length=0;route.geometry.coordinates.forEach(c=>routeCoords.push([c[1],c[0]]));steps.length=0;stepIdx=0;for(const leg of route.legs)for(const step of leg.steps){{const m=step.maneuver||{{}};steps.push({{instruction:m.instruction||(m.type||'Continue'),road:step.name||step.ref||'the road ahead',distance:Math.round(step.distance||0)}});}}
-  const d_card = document.getElementById('live-dist-card');
-  const t_card = document.getElementById('live-eta-card');
-  if (d_card) d_card.textContent = (route.distance/1000).toFixed(2) + ' km';
-  if (t_card) t_card.textContent = (route.duration/60).toFixed(1) + ' mins';
+  const d_card=document.getElementById('live-dist-card');
+  const t_card=document.getElementById('live-eta-card');
+  if(d_card)d_card.textContent=(route.distance/1000).toFixed(2)+' km';
+  if(t_card)t_card.textContent=(route.duration/60).toFixed(1)+' mins';
   }}catch(e){{console.error(e);}}rerouting=false;}}
+
 function startNav(){{
   document.getElementById('start-btn').style.display='none';
-  navActive = true;
+  navActive=true;
   const go=()=>{{
     const u=new SpeechSynthesisUtterance('Navigation started. Follow the route.');
-    u.lang='en-IN'; u.rate=0.9; u.volume=1;
+    u.lang='en-IN';u.rate=0.9;u.volume=1;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
   }};
   const voices=window.speechSynthesis.getVoices();
-  if(voices.length){{ go(); }} else {{ window.speechSynthesis.onvoiceschanged=go; }}
+  if(voices.length){{go();}}else{{window.speechSynthesis.onvoiceschanged=go;}}
 }}
 </script></body></html>""", height=460, width=10000, scrolling=False)
 
@@ -1090,46 +930,35 @@ function startNav(){{
             expl     = item.get("explanation", "")
 
             st.markdown(f"""
-            <div style="
-              background:#161b22;
-              border:1px solid #21262d;
-              border-left:4px solid {cfg['border']};
-              border-radius:10px;
-              padding:16px 20px;
-              margin-bottom:10px;
-            ">
-              <!-- Top row -->
+            <div style="background:#161b22; border:1px solid #21262d; border-left:4px solid {cfg['border']};
+              border-radius:10px; padding:16px 20px; margin-bottom:10px;">
               <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
-                <span style="
-                  display:inline-flex; align-items:center; gap:6px;
+                <span style="display:inline-flex; align-items:center; gap:6px;
                   background:{cfg['bg']}; border:1px solid {cfg['border']};
                   border-radius:999px; padding:4px 12px;
-                  font-size:12px; font-weight:700; color:{cfg['color']};
-                ">{cfg['emoji']} &nbsp;{urgency}</span>
+                  font-size:12px; font-weight:700; color:{cfg['color']};">
+                  {cfg['emoji']} &nbsp;{urgency}
+                </span>
                 <span style="font-size:11px; color:#484f58;">🕒 {created}</span>
               </div>
-              <!-- Meta row -->
               <div style="display:flex; gap:20px; flex-wrap:wrap; margin-bottom:12px;">
                 <span style="font-size:12px; color:#8b949e;">🏢 <b style="color:#c9d1d9;">{dept}</b></span>
                 <span style="font-size:12px; color:#8b949e;">📌 <b style="color:#c9d1d9;">{status}</b></span>
                 <span style="font-size:12px; color:#8b949e;">⏳ <b style="color:#c9d1d9;">{eta}</b></span>
                 <span style="font-size:12px; color:#8b949e;">📍 <b style="color:#c9d1d9;">{loc_name}</b></span>
               </div>
-              <!-- Complaint text -->
-              <div style="
-                background:#0d1117; border:1px solid #21262d; border-radius:8px;
+              <div style="background:#0d1117; border:1px solid #21262d; border-radius:8px;
                 padding:10px 14px; font-size:13px; color:#c9d1d9;
-                line-height:1.6; margin-bottom:10px; font-family:monospace;
-              ">{text}</div>
-              <!-- Explanation -->
-              <div style="
-                background:#0d1117; border-left:3px solid #1f6feb;
+                line-height:1.6; margin-bottom:10px; font-family:monospace;">
+                {text}
+              </div>
+              <div style="background:#0d1117; border-left:3px solid #1f6feb;
                 border-radius:0 8px 8px 0; padding:10px 14px;
-                font-size:13px; color:#8b949e; line-height:1.6;
-              ">🧠 &nbsp;{expl}</div>
+                font-size:13px; color:#8b949e; line-height:1.6;">
+                🧠 &nbsp;{expl}
+              </div>
             </div>
             """, unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"Error loading dashboard: {e}")
-        
