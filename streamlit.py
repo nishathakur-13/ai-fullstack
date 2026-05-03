@@ -1101,6 +1101,10 @@ function onGpsUpdate(lat,lon){{
 
 }}
 
+// -----------------------------------
+// ANDROID APP LIVE GPS
+// -----------------------------------
+
 window.addEventListener("message", (event) => {{
 
   if(
@@ -1116,6 +1120,45 @@ window.addEventListener("message", (event) => {{
   }}
 
 }});
+
+
+// -----------------------------------
+// DIRECT BROWSER GPS FALLBACK
+// -----------------------------------
+
+if(navigator.geolocation){{
+
+  navigator.geolocation.watchPosition(
+
+    (pos)=>{{
+
+      onGpsUpdate(
+
+        pos.coords.latitude,
+
+        pos.coords.longitude
+
+      );
+
+    }},
+
+    (err)=>{{
+      console.log(err);
+    }},
+
+    {{
+
+      enableHighAccuracy:true,
+
+      maximumAge:0,
+
+      timeout:10000
+
+    }}
+
+  );
+
+}}
 function speak(t){{if(t===lastSpoken)return;lastSpoken=t;const u=new SpeechSynthesisUtterance(t);u.lang='en-IN';u.rate=0.9;u.pitch=1;u.volume=1;window.speechSynthesis.cancel();window.speechSynthesis.speak(u);}}
 function updateNav(){{if(!steps.length)return;while(stepIdx<steps.length-1&&steps[stepIdx].distance<30)stepIdx++;const s=steps[stepIdx];speak((s.instruction||'Continue')+(s.road?' on '+s.road:'')+(s.distance?', in '+s.distance+' meters':''));}}
 async function reroute(lat,lon){{if(rerouting)return;rerouting=true;speak('Rerouting');try{{let via='';if(lastPos&&haversine(lastPos,[lat,lon])>5){{const wp=headingWaypoint(lastPos,[lat,lon],200);via=wp[1]+','+wp[0]+';';}}const r=await fetch('https://router.project-osrm.org/route/v1/driving/'+lon+','+lat+';'+via+DEST[1]+','+DEST[0]+'?overview=full&geometries=geojson&steps=true');const d=await r.json();const route=d.routes[0];if(routeLine)map2.removeLayer(routeLine);routeLine=L.polyline(route.geometry.coordinates.map(c=>[c[1],c[0]]),{{color:'#facc15',weight:5,opacity:0.85}}).addTo(map2);routeCoords.length=0;route.geometry.coordinates.forEach(c=>routeCoords.push([c[1],c[0]]));steps.length=0;stepIdx=0;for(const leg of route.legs)for(const step of leg.steps){{const m=step.maneuver||{{}};steps.push({{instruction:m.instruction||(m.type||'Continue'),road:step.name||step.ref||'the road ahead',distance:Math.round(step.distance||0)}});}}
