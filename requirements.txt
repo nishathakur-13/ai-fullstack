@@ -3,6 +3,7 @@ uvicorn
 python-dotenv
 pydantic
 python-multipart
+streamlit-autorefresh
 
 # LangChain + LangGraph
 langchain
