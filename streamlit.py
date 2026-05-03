@@ -999,22 +999,23 @@ setTimeout(()=>{{map1.invalidateSize();map2.invalidateSize();if(routeLine)map2.f
 // ── Live tracking ─────────────────────────────────
 function haversine(a,b){{const R=6371000,dLat=(b[0]-a[0])*Math.PI/180,dLon=(b[1]-a[1])*Math.PI/180;const s=Math.sin(dLat/2)**2+Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLon/2)**2;return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));}}
 function minDistToRoute(pos){{if(!routeCoords.length)return 0;let min=Infinity;for(let i=0;i<routeCoords.length-1;i++){{const a=routeCoords[i],b=routeCoords[i+1],dx=b[1]-a[1],dy=b[0]-a[0],len2=dx*dx+dy*dy;let t=len2?Math.max(0,Math.min(1,((pos[1]-a[1])*dx+(pos[0]-a[0])*dy)/len2)):0;min=Math.min(min,haversine(pos,[a[0]+t*dy,a[1]+t*dx]));}}return min;}}
-function headingWaypoint(from,to,d){{const R=6371000,la=from[0]*Math.PI/180,lo=from[1]*Math.PI/180,br=Math.atan2(Math.sin((to[1]-from[1])*Math.PI/180)*Math.cos(to[0]*Math.PI/180),Math.cos(from[0]*Math.PI/180)*Math.sin(to[0]*Math.PI/180)-Math.sin(from[0]*Math.PI/180)*Math.cos(to[0]*Math.PI/180)*Math.cos((to[1]-from[1])*Math.PI/180)),dd=d/R,la2=Math.asin(Math.sin(la)*Math.cos(dd)+Math.cos(la)*Math.sin(dd)*Math.cos(br));return[la2*180/Math.PI,(lo+Math.atan2(Math.sin(br)*Math.sin(dd)*Math.cos(la),Math.cos(dd)-Math.sin(la)*Math.sin(la2)))*180/Math.PI];}}
+function bearing(a,b){{const lat1=a[0]*Math.PI/180;const lat2=b[0]*Math.PI/180;const dLon=(b[1]-a[1])*Math.PI/180;const y=Math.sin(dLon)*Math.cos(lat2);const x=Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon);return(Math.atan2(y,x)*180/Math.PI+360)%360;}}
+
 let stepIdx=0,lastSpoken='',rerouting=false,lastPos=null, navActive = false;
 
 function onGpsUpdate(lat,lon){{
 
   userMarker.setLatLng([lat, lon]);
 
-  map2.panTo([lat, lon], {{
-    animate: true,
-    duration: 0.5
-  }});
+  map2.panTo(
+    [lat, lon],
+    {{
+      animate: true,
+      duration: 0.5
+    }}
+  );
 
-  map1.panTo([lat, lon], {{
-    animate: true,
-    duration: 0.5
-  }});
+  
 
   // -----------------------------------
   // LIVE DISTANCE + ETA UPDATE
@@ -1088,15 +1089,76 @@ if(t_card){{
 
     updateNav();
 
-    if(
-      minDistToRoute(
-        [lat, lon]
-      ) > 30
-    ){{
+    let shouldReroute = false;
 
-      reroute(lat, lon);
+// -----------------------------------
+// OFF ROUTE CHECK
+// -----------------------------------
 
-    }}
+if(
+
+  minDistToRoute(
+    [lat, lon]
+  ) > 30
+
+){{
+
+  shouldReroute = true;
+
+}}
+
+// -----------------------------------
+// HEADING CHANGE CHECK
+// -----------------------------------
+
+if(lastPos){{
+
+  const userHeading =
+
+  bearing(
+
+    lastPos,
+
+    [lat, lon]
+
+  );
+
+  const routeHeading =
+
+  bearing(
+
+    [lat, lon],
+
+    DEST
+
+  );
+
+  let diff = Math.abs(
+
+    userHeading
+    -
+    routeHeading
+
+  );
+
+  diff = Math.min(
+    diff,
+    360 - diff
+  );
+
+  if(diff > 30){{
+
+    shouldReroute = true;
+
+  }}
+
+}}
+
+if(shouldReroute){{
+
+  reroute(lat, lon);
+
+}}
 
   }}
 
@@ -1153,7 +1215,7 @@ if(navigator.geolocation){{
 
       enableHighAccuracy:true,
 
-      maximumAge:0,
+      maximumAge:1000,
 
       timeout:10000
 
@@ -1164,172 +1226,31 @@ if(navigator.geolocation){{
 }}
 function speak(t){{if(t===lastSpoken)return;lastSpoken=t;const u=new SpeechSynthesisUtterance(t);u.lang='en-IN';u.rate=0.9;u.pitch=1;u.volume=1;window.speechSynthesis.cancel();window.speechSynthesis.speak(u);}}
 function updateNav(){{if(!steps.length)return;while(stepIdx<steps.length-1&&steps[stepIdx].distance<30)stepIdx++;const s=steps[stepIdx];speak((s.instruction||'Continue')+(s.road?' on '+s.road:'')+(s.distance?', in '+s.distance+' meters':''));}}
-async function reroute(lat,lon){{
-
-  if(rerouting)return;
-
-  rerouting = true;
-
-  speak('Rerouting');
-
-  try{{
-
-    const r = await fetch(
-
-      'https://router.project-osrm.org/route/v1/driving/'
-
-      +
-
-      lon
-
-      +
-
-      ','
-
-      +
-
-      lat
-
-      +
-
-      ';'
-
-      +
-
-      DEST[1]
-
-      +
-
-      ','
-
-      +
-
-      DEST[0]
-
-      +
-
-      '?overview=full&geometries=geojson&steps=true'
-
-    );
-
-    const d = await r.json();
-
-    const route = d.routes[0];
-
-    if(routeLine){{
-      map2.removeLayer(routeLine);
-    }}
-
-    routeLine = L.polyline(
-
-      route.geometry.coordinates.map(
-
-        c => [c[1], c[0]]
-
-      ),
-
-      {{
-
-        color:'#facc15',
-
-        weight:5,
-
-        opacity:0.85
-
-      }}
-
-    ).addTo(map2);
-
-    routeCoords.length = 0;
-
-    route.geometry.coordinates.forEach(
-
-      c => routeCoords.push(
-
-        [c[1], c[0]]
-
-      )
-
-    );
-
-    steps.length = 0;
-
-    stepIdx = 0;
-
-    for(const leg of route.legs){{
-
-      for(const step of leg.steps){{
-
-        const m =
-
-        step.maneuver || {{}};
-
-        steps.push({{
-
-          instruction:
-
-          m.instruction ||
-
-          (m.type || 'Continue'),
-
-          road:
-
-          step.name ||
-
-          step.ref ||
-
-          'the road ahead',
-
-          distance:
-
-          Math.round(
-
-            step.distance || 0
-
-          )
-
-        }});
-
-      }}
-
-    }}
-
-    const parentDoc =
-    window.parent.document;
-
-    const d_card =
-    parentDoc.getElementById(
-      'live-dist-card'
-    );
-
-    const t_card =
-    parentDoc.getElementById(
-      'live-eta-card'
-    );
-
-    if(d_card){{
-      d_card.textContent =
-      (route.distance/1000)
-      .toFixed(2)
-      + ' km';
-    }}
-
-    if(t_card){{
-      t_card.textContent =
-      (route.duration/60)
-      .toFixed(1)
-      + ' mins';
-    }}
-
-  }}
-
-  catch(e){{
-    console.error(e);
-  }}
-
-  rerouting = false;
-
-}}
+async function reroute(lat,lon){{if(rerouting)return;rerouting=true;speak('Rerouting');try{{const r = await fetch(
+  'https://router.project-osrm.org/route/v1/driving/'
+  +
+  lon
+  +
+  ','
+  +
+  lat
+  +
+  ';'
+  +
+  DEST[1]
+  +
+  ','
+  +
+  DEST[0]
+  +
+  '?overview=full&geometries=geojson&steps=true'
+);const d=await r.json();const route=d.routes[0];if(routeLine)map2.removeLayer(routeLine);routeLine=L.polyline(route.geometry.coordinates.map(c=>[c[1],c[0]]),{{color:'#facc15',weight:5,opacity:0.85}}).addTo(map2);routeCoords.length=0;route.geometry.coordinates.forEach(c=>routeCoords.push([c[1],c[0]]));steps.length=0;stepIdx=0;for(const leg of route.legs)for(const step of leg.steps){{const m=step.maneuver||{{}};steps.push({{instruction:m.instruction||(m.type||'Continue'),road:step.name||step.ref||'the road ahead',distance:Math.round(step.distance||0)}});}}
+  const parentDoc = window.parent.document;
+  const d_card = parentDoc.getElementById('live-dist-card');
+  const t_card = parentDoc.getElementById('live-eta-card');
+  if (d_card) d_card.textContent = (route.distance/1000).toFixed(2) + ' km';
+  if (t_card) t_card.textContent = (route.duration/60).toFixed(1) + ' mins';
+  }}catch(e){{console.error(e);}}rerouting=false;}}
 function startNav(){{
   document.getElementById('start-btn').style.display='none';
   navActive = true;
