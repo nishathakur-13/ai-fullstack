@@ -1001,7 +1001,12 @@ function haversine(a,b){{const R=6371000,dLat=(b[0]-a[0])*Math.PI/180,dLon=(b[1]
 function minDistToRoute(pos){{if(!routeCoords.length)return 0;let min=Infinity;for(let i=0;i<routeCoords.length-1;i++){{const a=routeCoords[i],b=routeCoords[i+1],dx=b[1]-a[1],dy=b[0]-a[0],len2=dx*dx+dy*dy;let t=len2?Math.max(0,Math.min(1,((pos[1]-a[1])*dx+(pos[0]-a[0])*dy)/len2)):0;min=Math.min(min,haversine(pos,[a[0]+t*dy,a[1]+t*dx]));}}return min;}}
 function bearing(a,b){{const lat1=a[0]*Math.PI/180;const lat2=b[0]*Math.PI/180;const dLon=(b[1]-a[1])*Math.PI/180;const y=Math.sin(dLon)*Math.cos(lat2);const x=Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon);return(Math.atan2(y,x)*180/Math.PI+360)%360;}}
 
-let stepIdx=0,lastSpoken='',rerouting=false,lastPos=null, navActive = false;
+let stepIdx = 0;
+let lastSpoken = '';
+let rerouting = false;
+let lastPos = null;
+let navActive = false;
+let lastRerouteTime = 0;
 
 function onGpsUpdate(lat,lon){{
 
@@ -1099,7 +1104,7 @@ if(
 
   minDistToRoute(
     [lat, lon]
-  ) > 30
+  ) > 5
 
 ){{
 
@@ -1156,7 +1161,23 @@ if(lastPos){{
 
 if(shouldReroute){{
 
-  reroute(lat, lon);
+  const now = Date.now();
+
+  // prevent reroute spam
+
+  if(
+
+    now - lastRerouteTime
+
+    > 5000
+
+  ){{
+
+    lastRerouteTime = now;
+
+    reroute(lat, lon);
+
+  }}
 
 }}
 
