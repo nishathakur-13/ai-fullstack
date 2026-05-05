@@ -224,6 +224,18 @@ def safe_location(location, lat, lon):
     return location
 
 
+def densify(coords, segments=10):
+    dense = []
+    for i in range(len(coords) - 1):
+        a = coords[i]
+        b = coords[i+1]
+        for t in [j/segments for j in range(segments+1)]:
+            lat = a[1] + (b[1] - a[1]) * t
+            lon = a[0] + (b[0] - a[0]) * t
+            dense.append([lat, lon])
+    return dense
+
+
 @st.cache_data(ttl=60)
 def get_route(start_lat, start_lon, end_lat, end_lon):
 
@@ -916,7 +928,7 @@ with tab2:
         _dest_lat = float(sel_lat) if route_data else user_lat
         _dest_lon = float(sel_lon) if route_data else user_lon
         _route_coords_js = _json.dumps(
-            [[c[1], c[0]] for c in route_data["coordinates"]] if route_data else []
+            densify(route_data["coordinates"]) if route_data else []
         )
         _steps_js = _json.dumps(route_data["steps"] if route_data else [])
 
@@ -1032,7 +1044,6 @@ function pointToSegmentDistance(p, a, b){{
   return Math.sqrt(dLat*dLat + dLon*dLon);
 }}
 
-
 function minDistToRoute(pos){{
 
   if(routeCoords.length < 2) return 0;
@@ -1050,6 +1061,7 @@ function minDistToRoute(pos){{
     if(d < min){{
       min = d;
     }}
+
   }}
 
   return min;
@@ -1149,66 +1161,18 @@ if(t_card){{
 
     updateNav();
 
-    let shouldReroute = false;
-
-    // -----------------------------------
-    // TRUE OFF-ROUTE CHECK
-    // -----------------------------------
-
     const distFromRoute = minDistToRoute([lat, lon]);
 
-    if(distFromRoute > 6){{
-
-      shouldReroute = true;
-
-    }}
-
-    // -----------------------------------
-    // HEADING CHANGE CHECK
-    // -----------------------------------
-
-    if(lastPos && haversine(lastPos, [lat, lon]) > 3){{
-
-      const userHeading = bearing(lastPos, [lat, lon]);
-                  // find nearest point on route first
-      let closestIndex = 0;
-      let minDist = Infinity;
-
-      for (let i = 0; i < routeCoords.length; i++) {{
-        const d = haversine([lat, lon], routeCoords[i]);
-        if (d < minDist) {{
-          minDist = d;
-          closestIndex = i;
-        }}
-      }}
-
-      // now pick a point AHEAD of user on route
-      let nextPoint = routeCoords[Math.min(closestIndex + 5, routeCoords.length - 1)];
-      const routeHeading = bearing(
-        [lat, lon],
-        nextPoint
-      );
-
-      let diff = Math.abs(userHeading - routeHeading);
-      diff = Math.min(diff, 360 - diff);
-
-      if(diff > 30){{
-        shouldReroute = true;
-      }}
-
-    }}
-
-    // -----------------------------------
-    // APPLY REROUTE WITH COOLDOWN
-    // -----------------------------------
-
-    if(shouldReroute){{
+    if(distFromRoute > 10){{
 
       const now = Date.now();
 
       if(now - lastRerouteTime > 1500){{
 
+        console.log("FORCED REROUTE ");
+
         lastRerouteTime = now;
+
         reroute(lat, lon);
 
       }}
@@ -1296,7 +1260,27 @@ async function reroute(lat,lon){{
     if(routeLine) map2.removeLayer(routeLine);
     routeLine = L.polyline(route.geometry.coordinates.map(c=>[c[1],c[0]]),{{color:'#facc15',weight:5,opacity:0.85}}).addTo(map2);
     routeCoords.length = 0;
-    route.geometry.coordinates.forEach(c=>routeCoords.push([c[1],c[0]]));
+
+    const coords = route.geometry.coordinates;
+
+    for(let i = 0; i < coords.length - 1; i++){{
+
+      const a = coords[i];
+      const b = coords[i+1];
+
+      // create intermediate points every ~5m
+      const segments = 10;
+
+      for(let t = 0; t <= 1; t += 1/segments){{
+
+        const lat = a[1] + (b[1] - a[1]) * t;
+        const lon = a[0] + (b[0] - a[0]) * t;
+
+        routeCoords.push([lat, lon]);
+
+      }}
+
+    }}
     steps.length = 0;
     stepIdx = 0;
     lastPos = [lat, lon]; // Reset position state
