@@ -7,12 +7,8 @@ from folium.plugins import AntPath
 from geopy.geocoders import Nominatim
 
 from streamlit_folium import st_folium
+from streamlit_js_eval import streamlit_js_eval, get_geolocation
 geolocator = Nominatim(user_agent="civicai_nav")
-
-_gps_receiver = components.declare_component(
-    "gps_receiver",
-    path=os.path.dirname(os.path.abspath(__file__))
-)
 
 
 API_URL = os.getenv(
@@ -32,6 +28,15 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# GPS — get_geolocation uses Streamlit's own iframe with geolocation permission
+if "gps_lat" not in st.session_state:
+    _gps = get_geolocation()
+    if _gps and _gps.get("coords"):
+        st.session_state["gps_lat"] = _gps["coords"]["latitude"]
+        st.session_state["gps_lon"] = _gps["coords"]["longitude"]
+        st.rerun()
+
+# Auto-refresh every 5s for live movement tracking
 
 # =====================================================
 # GLOBAL CSS — dark theme, clean typography
@@ -168,6 +173,9 @@ if "analysis_result" not in st.session_state:
 
 if "_selected_complaint" not in st.session_state:
     st.session_state["_selected_complaint"] = None
+if "dest_lat" not in st.session_state:
+    st.session_state["dest_lat"] = None
+    st.session_state["dest_lon"] = None
 
 
 # =====================================================
@@ -190,41 +198,61 @@ def is_off_route(user_lat, user_lon, route_coords, threshold=12):
             return False
     return True
 
-@st.cache_data(ttl=30)
+def trim_route_to_closest(user_lat, user_lon, route_coords):
+    """Slice route so it starts from the closest point to the user."""
+    closest_idx = min(
+        range(len(route_coords)),
+        key=lambda i: distance_meters(user_lat, user_lon, route_coords[i][1], route_coords[i][0])
+    )
+    return route_coords[closest_idx:]
+
+@st.cache_data(ttl=30, show_spinner=False)
 def fetch_complaints():
     response = requests.get(f"{API_URL}/complaints")
     return response.json()
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
+def _reverse_geocode_cached(lat, lon):
+    url = (
+        "https://nominatim.openstreetmap.org/"
+        f"reverse?format=json&lat={lat}&lon={lon}&zoom=18&addressdetails=1"
+    )
+    response = requests.get(url, headers={"User-Agent": "civic-ai-system"}, timeout=10)
+    data = response.json()
+    address = data.get("address", {})
+    return (
+        address.get("amenity")
+        or address.get("building")
+        or address.get("tourism")
+        or address.get("leisure")
+        or address.get("road")
+        or address.get("neighbourhood")
+        or address.get("suburb")
+        or address.get("town")
+        or address.get("city")
+        or data.get("display_name")
+    )
+
 def reverse_geocode(lat, lon):
     try:
-        url = (
-            "https://nominatim.openstreetmap.org/"
-            f"reverse?format=json&lat={lat}&lon={lon}"
-        )
-        headers = {"User-Agent": "civic-ai-system"}
-        response = requests.get(url, headers=headers, timeout=5)
-        data = response.json()
-        address = data.get("address", {})
-        return (
-            address.get("road")
-            or address.get("neighbourhood")
-            or address.get("suburb")
-            or address.get("city")
-            or address.get("town")
-            or address.get("village")
-            or data.get("display_name")
-        )
+        result = _reverse_geocode_cached(lat, lon)
+        return result
     except:
+        _reverse_geocode_cached.clear()
         return None
+
+if "geocache_cleared" not in st.session_state:
+    _reverse_geocode_cached.clear()
+    st.session_state["geocache_cleared"] = True
 
 
 def safe_location(location, lat, lon):
     invalid_values = ["none", "none, none", "null", "null, null", ""]
     if not location or str(location).strip().lower() in invalid_values:
         if lat is not None and lon is not None:
-            return reverse_geocode(lat, lon) or "Location unavailable"
+            name = reverse_geocode(lat, lon)
+            return name if name else f"{round(float(lat),5)}, {round(float(lon),5)}"
         return "Location unavailable"
     return location
 
@@ -241,7 +269,7 @@ def densify(coords, segments=10):
     return dense
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=60, show_spinner=False)
 def get_route(start_lat, start_lon, end_lat, end_lon):
 
     try:
@@ -252,10 +280,10 @@ def get_route(start_lat, start_lon, end_lat, end_lon):
 
         url = (
             "https://router.project-osrm.org/"
-            f"route/v1/driving/"
+            f"route/v1/foot/"
             f"{start_lon},{start_lat};"
             f"{end_lon},{end_lat}"
-            f"?overview=full&geometries=geojson&steps=true&annotations=true"
+            f"?overview=full&geometries=geojson&steps=true&annotations=true&radiuses=50;unlimited"
         )
 
         print("\n======================")
@@ -357,11 +385,14 @@ def get_route(start_lat, start_lon, end_lat, end_lon):
                 instruction = f"{verb} {road_name}".strip()
 
                 distance = round(step.get("distance", 0))
+                loc = maneuver.get("location")  # [lon, lat]
 
                 steps.append({
                     "instruction": instruction,
                     "road": road_name,
-                    "distance": distance
+                    "distance": distance,
+                    "lat": loc[1] if loc else None,
+                    "lon": loc[0] if loc else None,
                 })
 
         geometry = route.get("geometry")
@@ -384,6 +415,9 @@ def get_route(start_lat, start_lon, end_lat, end_lon):
             return None
 
         print("\n✅ ROUTE SUCCESS")
+        # Prepend exact user position so route visually starts from inside building
+        if coordinates and [start_lon, start_lat] != coordinates[0]:
+            coordinates = [[start_lon, start_lat]] + coordinates
         return {
             "coordinates": coordinates,
             "steps": steps,
@@ -415,6 +449,29 @@ FOLIUM_COLOR = {
 # =====================================================
 # TABS
 # =====================================================
+
+# Auto-reroute: if user drifts >5m off current route, regenerate from current position
+if (
+    "gps_lat" in st.session_state
+    and st.session_state.get("dest_lat")
+    and st.session_state.get("current_route")
+):
+    _route = st.session_state["current_route"]
+    if is_off_route(
+        st.session_state["gps_lat"], st.session_state["gps_lon"],
+        _route["coordinates"], threshold=5
+    ):
+        _new_route = get_route(
+            st.session_state["gps_lat"], st.session_state["gps_lon"],
+            st.session_state["dest_lat"], st.session_state["dest_lon"]
+        )
+        if _new_route:
+            _new_route["coordinates"] = trim_route_to_closest(
+                st.session_state["gps_lat"], st.session_state["gps_lon"],
+                _new_route["coordinates"]
+            )
+            st.session_state["current_route"] = _new_route
+            st.session_state["rerouted"] = True
 
 tab1, tab2 = st.tabs(["📝  Submit Complaint", "📊  Dashboard"])
 
@@ -575,11 +632,32 @@ with tab2:
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
     # =================================================
-    # GPS
+    # GPS — wait for live location before proceeding
     # =================================================
+
+    if "gps_lat" not in st.session_state or "gps_lon" not in st.session_state:
+        st.markdown("""
+        <div style="text-align:center;padding:60px 20px;">
+          <div style="font-size:48px;margin-bottom:16px;animation:spin 1.2s linear infinite;display:inline-block">📡</div>
+          <style>@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}</style>
+          <div style="font-size:20px;font-weight:700;color:#e6edf3;margin-bottom:24px;">
+            Fetching your live location<span id="dots"></span>
+          </div>
+          <div style="width:260px;margin:0 auto;background:#21262d;border-radius:99px;height:8px;overflow:hidden;">
+            <div id="bar" style="height:100%;width:0%;background:linear-gradient(90deg,#2563eb,#60a5fa);border-radius:99px;animation:fill 3s ease forwards;"></div>
+          </div>
+          <style>@keyframes fill{0%{width:0%}80%{width:85%}100%{width:90%}}</style>
+        </div>
+        <script>
+        let d=0;const dots=document.getElementById('dots');
+        setInterval(()=>{d=(d+1)%4;dots.textContent='.'.repeat(d);},400);
+        </script>
+        """, unsafe_allow_html=True)
+        st.stop()
 
     lat = None
     lon = None
+
 
     if "gps_lat" in st.session_state and "gps_lon" in st.session_state:
         user_lat = st.session_state["gps_lat"]
@@ -600,7 +678,8 @@ with tab2:
     # =================================================
 
     try:
-        all_complaints = fetch_complaints()
+        with st.spinner("📋 Loading complaints..."):
+            all_complaints = fetch_complaints()
     except:
         all_complaints = []
 
@@ -782,6 +861,8 @@ with tab2:
             try:
                 sel_lat = float(selected["latitude"])
                 sel_lon = float(selected["longitude"])
+                st.session_state["dest_lat"] = sel_lat
+                st.session_state["dest_lon"] = sel_lon
             except Exception:
                 st.error("Invalid complaint coordinates.")
                 selected = None
@@ -795,19 +876,24 @@ with tab2:
                 ):
                     st.warning("User and complaint location are identical.")
 
-                route_data = get_route(
-                    float(user_lat),
-                    float(user_lon),
-                    sel_lat,
-                    sel_lon
+                # Use auto-rerouted route if available, else fetch fresh
+                _dest_changed = (
+                    st.session_state.get("dest_lat") != sel_lat or
+                    st.session_state.get("dest_lon") != sel_lon
                 )
-
-                if route_data:
-                    st.session_state["current_route"] = route_data
-                    if is_off_route(float(user_lat), float(user_lon), route_data["coordinates"]):
-                        st.error("⚠️ You are off-route. Rerouting...")
+                if st.session_state.get("current_route") and not _dest_changed:
+                    route_data = st.session_state["current_route"]
+                else:
+                    with st.spinner("🗺️ Fetching route..."):
                         route_data = get_route(float(user_lat), float(user_lon), sel_lat, sel_lon)
+                    if route_data:
+                        route_data["coordinates"] = trim_route_to_closest(
+                            float(user_lat), float(user_lon), route_data["coordinates"]
+                        )
                         st.session_state["current_route"] = route_data
+
+                if st.session_state.pop("rerouted", False):
+                    st.warning("🔄 Route recalculated — you went off-route.")
 
                 dept = selected.get("department", "N/A")
 
@@ -971,6 +1057,13 @@ html,body{{margin:0;padding:0;background:#0d1117;width:100%;overflow:hidden}}
     <div class="map-label">🚗 Live Route Map</div>
     <div style="position:relative">
       <div id="map2" class="map"></div>
+      <div id="nav-overlay" style="display:none;position:absolute;top:10px;left:10px;right:10px;z-index:1000;background:rgba(17,24,39,0.95);border:2px solid #2563eb;border-radius:14px;padding:12px 16px;pointer-events:none;">
+        <div style="font-size:10px;color:#60a5fa;font-weight:700;letter-spacing:1px;margin-bottom:4px;">NEXT TURN</div>
+        <div id="nav-arrow" style="font-size:28px;display:inline-block;margin-right:8px;vertical-align:middle;">⬆️</div>
+        <span id="nav-instruction" style="font-size:18px;font-weight:800;color:white;vertical-align:middle;"></span>
+        <div id="nav-road" style="font-size:13px;color:#d1d5db;margin-top:4px;"></div>
+        <div id="nav-dist" style="font-size:22px;color:#facc15;font-weight:800;margin-top:6px;"></div>
+      </div>
       <button id="start-btn" onclick="startNav()" style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);z-index:1000;background:#2563eb;color:#fff;border:none;border-radius:24px;padding:10px 24px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(37,99,235,0.5)">▶ Start Navigation</button>
     </div>
   </div>
@@ -1161,15 +1254,20 @@ if(t_card){{
 
     }}
 
-    updateNav();
+    updateNav(lat, lon);
+
+  }}
+
+  // Auto-reroute whenever off route (works with or without nav active)
+  if(routeCoords.length){{
 
     const distFromRoute = minDistToRoute([lat, lon]);
 
-    if(distFromRoute > 10){{
+    if(distFromRoute > 5){{
 
       const now = Date.now();
 
-      if(now - lastRerouteTime > 1500){{
+      if(now - lastRerouteTime > 10000){{
 
         console.log("FORCED REROUTE ");
 
@@ -1246,31 +1344,67 @@ if(navigator.geolocation){{
 
 }}
 function speak(t){{if(t===lastSpoken)return;lastSpoken=t;const u=new SpeechSynthesisUtterance(t);u.lang='en-IN';u.rate=0.9;u.pitch=1;u.volume=1;window.speechSynthesis.cancel();window.speechSynthesis.speak(u);}}
-function updateNav(){{if(!steps.length)return;while(stepIdx<steps.length-1&&steps[stepIdx].distance<30)stepIdx++;const s=steps[stepIdx];speak((s.instruction||'Continue')+(s.road?' on '+s.road:'')+(s.distance?', in '+s.distance+' meters':''));}}
+
+const TURN_ARROWS={{'turn left':'↰','turn right':'↱','turn slight left':'↖','turn slight right':'↗','turn sharp left':'⬅','turn sharp right':'➡','u-turn':'↩','arrive':'🏁','depart':'🚀','roundabout':'🔄','continue':'⬆'}};
+function turnArrow(instruction){{
+  const k=instruction.toLowerCase();
+  for(const [kw,arrow] of Object.entries(TURN_ARROWS)){{if(k.includes(kw))return arrow;}}
+  return '⬆';
+}}
+
+function updateNav(userLat, userLon){{
+  if(!steps.length||!navActive)return;
+  // Advance step if we're within 15m of the maneuver point
+  while(stepIdx < steps.length-1){{
+    const s=steps[stepIdx];
+    if(s.lat!=null){{
+      const d=haversine([userLat,userLon],[s.lat,s.lon]);
+      if(d<15){{stepIdx++;continue;}}
+    }}
+    break;
+  }}
+  const s=steps[stepIdx];
+  // Live distance to next maneuver
+  const liveDist = s.lat!=null ? Math.round(haversine([userLat,userLon],[s.lat,s.lon])) : s.distance;
+  const distTxt = liveDist<1000 ? liveDist+'m' : (liveDist/1000).toFixed(1)+'km';
+  const arrow=turnArrow(s.instruction||'');
+  // Update overlay
+  const ov=document.getElementById('nav-overlay');
+  if(ov){{
+    ov.style.display='block';
+    document.getElementById('nav-arrow').textContent=arrow;
+    document.getElementById('nav-instruction').textContent=s.instruction||'Continue';
+    document.getElementById('nav-road').textContent=s.road?'on '+s.road:'';
+    document.getElementById('nav-dist').textContent='in '+distTxt;
+  }}
+  // Speak at 200m, 100m, 30m
+  if([200,100,30].some(t=>liveDist<=t&&liveDist>t-20)){{
+    speak(arrow+' '+(s.instruction||'Continue')+(s.road?' on '+s.road:'')+', in '+distTxt);
+  }}
+}}
 async function reroute(lat,lon){{
   if(rerouting) return;
   rerouting = true;
   speak('Rerouting');
   try {{
     const r = await fetch(
-      'https://router.project-osrm.org/route/v1/driving/'
+      'https://router.project-osrm.org/route/v1/foot/'
       + lon + ',' + lat + ';' + DEST[1] + ',' + DEST[0]
-      + '?overview=full&geometries=geojson&steps=true'
+      + '?overview=full&geometries=geojson&steps=true&radiuses=50;unlimited'
     );
     const d = await r.json();
     const route = d.routes[0];
     if(routeLine) map2.removeLayer(routeLine);
-    routeLine = L.polyline(route.geometry.coordinates.map(c=>[c[1],c[0]]),{{color:'#facc15',weight:5,opacity:0.85}}).addTo(map2);
+    // Prepend exact user position so route starts from current location
+    const coords = [[lon, lat], ...route.geometry.coordinates];
+    routeLine = L.polyline(coords.map(c=>[c[1],c[0]]),{{color:'#facc15',weight:5,opacity:0.85}}).addTo(map2);
     routeCoords.length = 0;
-
-    const coords = route.geometry.coordinates;
 
     for(let i = 0; i < coords.length - 1; i++){{
 
       const a = coords[i];
       const b = coords[i+1];
 
-      // create intermediate points every ~5m
       const segments = 10;
 
       for(let t = 0; t <= 1; t += 1/segments){{
@@ -1285,13 +1419,16 @@ async function reroute(lat,lon){{
     }}
     steps.length = 0;
     stepIdx = 0;
-    lastPos = [lat, lon]; // Reset position state
+    lastPos = [lat, lon];
     for(const leg of route.legs) for(const step of leg.steps){{
       const m = step.maneuver||{{}};
+      const loc = m.location; // [lon, lat]
       steps.push({{
         instruction: m.instruction || (m.type||'Continue'),
         road: step.name || step.ref || 'the road ahead',
-        distance: Math.round(step.distance||0)
+        distance: Math.round(step.distance||0),
+        lat: loc ? loc[1] : null,
+        lon: loc ? loc[0] : null,
       }});
     }}
     const parentDoc = window.parent.document;
@@ -1306,6 +1443,7 @@ async function reroute(lat,lon){{
 }}
 function startNav(){{
   document.getElementById('start-btn').style.display='none';
+  document.getElementById('nav-overlay').style.display='block';
   navActive = true;
   const go=()=>{{
     const u=new SpeechSynthesisUtterance('Navigation started. Follow the route.');
@@ -1317,12 +1455,6 @@ function startNav(){{
   if(voices.length){{ go(); }} else {{ window.speechSynthesis.onvoiceschanged=go; }}
 }}
 </script></body></html>""", height=460, width=10000, scrolling=False)
-
-        _gps = _gps_receiver(key="gps_recv")
-        if _gps and "lat" in _gps:
-            st.session_state["gps_lat"] = _gps["lat"]
-            st.session_state["gps_lon"] = _gps["lon"]
-            st.rerun()
 
         if route_data and route_data.get("steps"):
             s = route_data["steps"][0]
