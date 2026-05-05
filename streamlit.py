@@ -9,6 +9,11 @@ from geopy.geocoders import Nominatim
 from streamlit_folium import st_folium
 geolocator = Nominatim(user_agent="civicai_nav")
 
+_gps_receiver = components.declare_component(
+    "gps_receiver",
+    path=os.path.dirname(os.path.abspath(__file__))
+)
+
 
 API_URL = os.getenv(
     "BACKEND_API_URL",
@@ -573,23 +578,18 @@ with tab2:
     # GPS
     # =================================================
 
-    lat = st.query_params.get("lat")
-    lon = st.query_params.get("lon")
+    lat = None
+    lon = None
 
-    # Only auto-refresh if GPS coords not yet received
-    if lat is None or lon is None:
-        from streamlit_autorefresh import st_autorefresh
-        st_autorefresh(interval=30000, key="gps_refresh")
-
-    if lat is not None and lon is not None:
-        user_lat = float(lat)
-        user_lon = float(lon)
+    if "gps_lat" in st.session_state and "gps_lon" in st.session_state:
+        user_lat = st.session_state["gps_lat"]
+        user_lon = st.session_state["gps_lon"]
         detected_location = safe_location(None, user_lat, user_lon)
         is_live = True
     else:
         user_lat = 29.2144809
         user_lon = 79.5279012
-        detected_location = "Location access not granted"
+        detected_location = "Getting live location..."
         is_live = False
 
     dot_color = "#22c55e" if is_live else "#f59e0b"
@@ -1077,6 +1077,8 @@ let lastRerouteTime = 0;
 
 function onGpsUpdate(lat,lon){{
 
+  window.parent.postMessage({{type:"GPS_UPDATE",lat:lat,lon:lon}},"*");
+
   userMarker.setLatLng([lat, lon]);
 
   map2.panTo(
@@ -1315,6 +1317,12 @@ function startNav(){{
   if(voices.length){{ go(); }} else {{ window.speechSynthesis.onvoiceschanged=go; }}
 }}
 </script></body></html>""", height=460, width=10000, scrolling=False)
+
+        _gps = _gps_receiver(key="gps_recv")
+        if _gps and "lat" in _gps:
+            st.session_state["gps_lat"] = _gps["lat"]
+            st.session_state["gps_lon"] = _gps["lon"]
+            st.rerun()
 
         if route_data and route_data.get("steps"):
             s = route_data["steps"][0]
