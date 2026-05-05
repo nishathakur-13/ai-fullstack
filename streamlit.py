@@ -179,7 +179,7 @@ def distance_meters(lat1, lon1, lat2, lon2):
     a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
     return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-def is_off_route(user_lat, user_lon, route_coords, threshold=30):
+def is_off_route(user_lat, user_lon, route_coords, threshold=12):
     for coord in route_coords:
         if distance_meters(user_lat, user_lon, coord[1], coord[0]) < threshold:
             return False
@@ -998,15 +998,60 @@ setTimeout(()=>{{map1.invalidateSize();map2.invalidateSize();if(routeLine)map2.f
 // Prime speechSynthesis on first user interaction (required by browsers)
 // ── Live tracking ─────────────────────────────────
 function haversine(a,b){{const R=6371000,dLat=(b[0]-a[0])*Math.PI/180,dLon=(b[1]-a[1])*Math.PI/180;const s=Math.sin(dLat/2)**2+Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLon/2)**2;return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));}}
+function pointToSegmentDistance(p, a, b){{
+
+  const R = 6371000;
+
+  const lat1 = a[0] * Math.PI/180;
+  const lon1 = a[1] * Math.PI/180;
+  const lat2 = b[0] * Math.PI/180;
+  const lon2 = b[1] * Math.PI/180;
+  const lat3 = p[0] * Math.PI/180;
+  const lon3 = p[1] * Math.PI/180;
+
+  const x1 = lon1 * Math.cos(lat1);
+  const y1 = lat1;
+  const x2 = lon2 * Math.cos(lat2);
+  const y2 = lat2;
+  const x3 = lon3 * Math.cos(lat3);
+  const y3 = lat3;
+
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+
+  const t = Math.max(0, Math.min(1,
+    ((x3 - x1)*dx + (y3 - y1)*dy) / (dx*dx + dy*dy)
+  ));
+
+  const x = x1 + t * dx;
+  const y = y1 + t * dy;
+
+  const dLat = (y3 - y) * R;
+  const dLon = (x3 - x) * R;
+
+  return Math.sqrt(dLat*dLat + dLon*dLon);
+}}
+
+
 function minDistToRoute(pos){{
-  if(!routeCoords.length) return 0;
+
+  if(routeCoords.length < 2) return 0;
+
   let min = Infinity;
-  for(let i=0; i<routeCoords.length; i++){{
-    const d = haversine(pos, routeCoords[i]);
+
+  for(let i=0; i<routeCoords.length - 1; i++){{
+
+    const d = pointToSegmentDistance(
+      pos,
+      routeCoords[i],
+      routeCoords[i+1]
+    );
+
     if(d < min){{
       min = d;
     }}
   }}
+
   return min;
 }}
 function bearing(a,b){{const lat1=a[0]*Math.PI/180;const lat2=b[0]*Math.PI/180;const dLon=(b[1]-a[1])*Math.PI/180;const y=Math.sin(dLon)*Math.cos(lat2);const x=Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon);return(Math.atan2(y,x)*180/Math.PI+360)%360;}}
@@ -1112,7 +1157,7 @@ if(t_card){{
 
     const distFromRoute = minDistToRoute([lat, lon]);
 
-    if(distFromRoute > 12){{
+    if(distFromRoute > 6){{
 
       shouldReroute = true;
 
@@ -1122,10 +1167,27 @@ if(t_card){{
     // HEADING CHANGE CHECK
     // -----------------------------------
 
-    if(lastPos){{
+    if(lastPos && haversine(lastPos, [lat, lon]) > 3){{
 
       const userHeading = bearing(lastPos, [lat, lon]);
-      const routeHeading = bearing([lat, lon], DEST);
+                  // find nearest point on route first
+      let closestIndex = 0;
+      let minDist = Infinity;
+
+      for (let i = 0; i < routeCoords.length; i++) {{
+        const d = haversine([lat, lon], routeCoords[i]);
+        if (d < minDist) {{
+          minDist = d;
+          closestIndex = i;
+        }}
+      }}
+
+      // now pick a point AHEAD of user on route
+      let nextPoint = routeCoords[Math.min(closestIndex + 5, routeCoords.length - 1)];
+      const routeHeading = bearing(
+        [lat, lon],
+        nextPoint
+      );
 
       let diff = Math.abs(userHeading - routeHeading);
       diff = Math.min(diff, 360 - diff);
