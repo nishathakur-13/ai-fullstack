@@ -998,7 +998,17 @@ setTimeout(()=>{{map1.invalidateSize();map2.invalidateSize();if(routeLine)map2.f
 // Prime speechSynthesis on first user interaction (required by browsers)
 // ── Live tracking ─────────────────────────────────
 function haversine(a,b){{const R=6371000,dLat=(b[0]-a[0])*Math.PI/180,dLon=(b[1]-a[1])*Math.PI/180;const s=Math.sin(dLat/2)**2+Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLon/2)**2;return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));}}
-function minDistToRoute(pos){{if(!routeCoords.length)return 0;let min=Infinity;for(let i=0;i<routeCoords.length-1;i++){{const a=routeCoords[i],b=routeCoords[i+1],dx=b[1]-a[1],dy=b[0]-a[0],len2=dx*dx+dy*dy;let t=len2?Math.max(0,Math.min(1,((pos[1]-a[1])*dx+(pos[0]-a[0])*dy)/len2)):0;min=Math.min(min,haversine(pos,[a[0]+t*dy,a[1]+t*dx]));}}return min;}}
+function minDistToRoute(pos){{
+  if(!routeCoords.length) return 0;
+  let min = Infinity;
+  for(let i=0; i<routeCoords.length; i++){{
+    const d = haversine(pos, routeCoords[i]);
+    if(d < min){{
+      min = d;
+    }}
+  }}
+  return min;
+}}
 function bearing(a,b){{const lat1=a[0]*Math.PI/180;const lat2=b[0]*Math.PI/180;const dLon=(b[1]-a[1])*Math.PI/180;const y=Math.sin(dLon)*Math.cos(lat2);const x=Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon);return(Math.atan2(y,x)*180/Math.PI+360)%360;}}
 
 let stepIdx = 0;
@@ -1096,90 +1106,52 @@ if(t_card){{
 
     let shouldReroute = false;
 
-// -----------------------------------
-// OFF ROUTE CHECK
-// -----------------------------------
+    // -----------------------------------
+    // TRUE OFF-ROUTE CHECK
+    // -----------------------------------
 
-if(
+    const distFromRoute = minDistToRoute([lat, lon]);
 
-  minDistToRoute(
-    [lat, lon]
-  ) > 5
+    if(distFromRoute > 12){{
 
-){{
+      shouldReroute = true;
 
-  shouldReroute = true;
+    }}
 
-}}
+    // -----------------------------------
+    // HEADING CHANGE CHECK
+    // -----------------------------------
 
-// -----------------------------------
-// HEADING CHANGE CHECK
-// -----------------------------------
+    if(lastPos){{
 
-if(lastPos){{
+      const userHeading = bearing(lastPos, [lat, lon]);
+      const routeHeading = bearing([lat, lon], DEST);
 
-  const userHeading =
+      let diff = Math.abs(userHeading - routeHeading);
+      diff = Math.min(diff, 360 - diff);
 
-  bearing(
+      if(diff > 30){{
+        shouldReroute = true;
+      }}
 
-    lastPos,
+    }}
 
-    [lat, lon]
+    // -----------------------------------
+    // APPLY REROUTE WITH COOLDOWN
+    // -----------------------------------
 
-  );
+    if(shouldReroute){{
 
-  const routeHeading =
+      const now = Date.now();
 
-  bearing(
+      if(now - lastRerouteTime > 1500){{
 
-    [lat, lon],
+        lastRerouteTime = now;
+        reroute(lat, lon);
 
-    DEST
+      }}
 
-  );
-
-  let diff = Math.abs(
-
-    userHeading
-    -
-    routeHeading
-
-  );
-
-  diff = Math.min(
-    diff,
-    360 - diff
-  );
-
-  if(diff > 30){{
-
-    shouldReroute = true;
-
-  }}
-
-}}
-
-if(shouldReroute){{
-
-  const now = Date.now();
-
-  // prevent reroute spam
-
-  if(
-
-    now - lastRerouteTime
-
-    > 5000
-
-  ){{
-
-    lastRerouteTime = now;
-
-    reroute(lat, lon);
-
-  }}
-
-}}
+    }}
 
   }}
 
@@ -1247,31 +1219,43 @@ if(navigator.geolocation){{
 }}
 function speak(t){{if(t===lastSpoken)return;lastSpoken=t;const u=new SpeechSynthesisUtterance(t);u.lang='en-IN';u.rate=0.9;u.pitch=1;u.volume=1;window.speechSynthesis.cancel();window.speechSynthesis.speak(u);}}
 function updateNav(){{if(!steps.length)return;while(stepIdx<steps.length-1&&steps[stepIdx].distance<30)stepIdx++;const s=steps[stepIdx];speak((s.instruction||'Continue')+(s.road?' on '+s.road:'')+(s.distance?', in '+s.distance+' meters':''));}}
-async function reroute(lat,lon){{if(rerouting)return;rerouting=true;speak('Rerouting');try{{const r = await fetch(
-  'https://router.project-osrm.org/route/v1/driving/'
-  +
-  lon
-  +
-  ','
-  +
-  lat
-  +
-  ';'
-  +
-  DEST[1]
-  +
-  ','
-  +
-  DEST[0]
-  +
-  '?overview=full&geometries=geojson&steps=true'
-);const d=await r.json();const route=d.routes[0];if(routeLine)map2.removeLayer(routeLine);routeLine=L.polyline(route.geometry.coordinates.map(c=>[c[1],c[0]]),{{color:'#facc15',weight:5,opacity:0.85}}).addTo(map2);routeCoords.length=0;route.geometry.coordinates.forEach(c=>routeCoords.push([c[1],c[0]]));steps.length=0;stepIdx=0;for(const leg of route.legs)for(const step of leg.steps){{const m=step.maneuver||{{}};steps.push({{instruction:m.instruction||(m.type||'Continue'),road:step.name||step.ref||'the road ahead',distance:Math.round(step.distance||0)}});}}
-  const parentDoc = window.parent.document;
-  const d_card = parentDoc.getElementById('live-dist-card');
-  const t_card = parentDoc.getElementById('live-eta-card');
-  if (d_card) d_card.textContent = (route.distance/1000).toFixed(2) + ' km';
-  if (t_card) t_card.textContent = (route.duration/60).toFixed(1) + ' mins';
-  }}catch(e){{console.error(e);}}rerouting=false;}}
+async function reroute(lat,lon){{
+  if(rerouting) return;
+  rerouting = true;
+  speak('Rerouting');
+  try {{
+    const r = await fetch(
+      'https://router.project-osrm.org/route/v1/driving/'
+      + lon + ',' + lat + ';' + DEST[1] + ',' + DEST[0]
+      + '?overview=full&geometries=geojson&steps=true'
+    );
+    const d = await r.json();
+    const route = d.routes[0];
+    if(routeLine) map2.removeLayer(routeLine);
+    routeLine = L.polyline(route.geometry.coordinates.map(c=>[c[1],c[0]]),{{color:'#facc15',weight:5,opacity:0.85}}).addTo(map2);
+    routeCoords.length = 0;
+    route.geometry.coordinates.forEach(c=>routeCoords.push([c[1],c[0]]));
+    steps.length = 0;
+    stepIdx = 0;
+    lastPos = [lat, lon]; // Reset position state
+    for(const leg of route.legs) for(const step of leg.steps){{
+      const m = step.maneuver||{{}};
+      steps.push({{
+        instruction: m.instruction || (m.type||'Continue'),
+        road: step.name || step.ref || 'the road ahead',
+        distance: Math.round(step.distance||0)
+      }});
+    }}
+    const parentDoc = window.parent.document;
+    const d_card = parentDoc.getElementById('live-dist-card');
+    const t_card = parentDoc.getElementById('live-eta-card');
+    if (d_card) d_card.textContent = (route.distance/1000).toFixed(2) + ' km';
+    if (t_card) t_card.textContent = (route.duration/60).toFixed(1) + ' mins';
+  }} catch(e) {{
+    console.error(e);
+  }}
+  rerouting = false;
+}}
 function startNav(){{
   document.getElementById('start-btn').style.display='none';
   navActive = true;
