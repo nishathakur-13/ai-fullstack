@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head><script src="https://unpkg.com/streamlit-component-lib@2.0.0/dist/index.js"></script></head>
+<body>
+<script>
+window.addEventListener("message", (e) => {
+  if (e.data && e.data.type === "GPS_UPDATE") {
+    Streamlit.setComponentValue({lat: e.data.lat, lon: e.data.lon});
+  }
+});
+Streamlit.setFrameHeight(0);
+</script>
+</body>
+</html>
