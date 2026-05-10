@@ -3,7 +3,6 @@ uvicorn
 python-dotenv
 pydantic
 python-multipart
-streamlit-autorefresh
 
 # LangChain + LangGraph
 langchain
@@ -28,7 +27,10 @@ geopy
 streamlit
 streamlit-folium
 streamlit-geolocation
+streamlit-js-eval
+streamlit-autorefresh
 folium
+streamlit_js_eval
 
 # Data handling
 pandas
